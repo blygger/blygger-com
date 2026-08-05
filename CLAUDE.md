@@ -5,12 +5,12 @@
 
 The commercial-development-adjacent face of the Blygger protocol at
 **blygger.com**: a home for protocol-adjacent commercial work, and a live
-`/blygg` deployment that doubles as one of the two initial cross-client test
+`/blyg` deployment that doubles as one of the two initial cross-client test
 instances (the other is [`../blygger-org/`](../blygger-org/)).
 
 Scaffolded session 6 (2026-07-24), part of the brand-rename + scaffolding session
 that also produced `blygger-spec` and `blygger-org`. **Deployment plan (stack,
-content, /blygg wiring) lives in `blygger-spec/docs/deploy-stub-sites-plan.md`** —
+content, /blyg wiring) lives in `blygger-spec/docs/deploy-stub-sites-plan.md`** —
 read that before building anything here; nothing beyond this stub scaffold has
 been built yet.
 

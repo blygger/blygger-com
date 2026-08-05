@@ -5,7 +5,7 @@
 
 ## Upcoming
 - Execute `blygger-spec/docs/deploy-stub-sites-plan.md`: stub landing page +
-  `/blygg` test-client deployment to blygger.com.
+  `/blyg` test-client deployment to blygger.com.
 
 ## Done
 - **2026-07-24** — Repo scaffolded (CLAUDE.md, README.md, LICENSE, .gitignore),

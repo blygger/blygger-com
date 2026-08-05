@@ -6,7 +6,7 @@ decentralized public writing medium (fragments + threads + TK-transclusion over
 static files + RSS).
 
 `blygger.com` is a home for commercial work adjacent to the protocol. It will
-also run a live `/blygg` deployment — one of the two initial cross-client test
+also run a live `/blyg` deployment — one of the two initial cross-client test
 instances (the other lives at [blygger.org](https://blygger.org),
 [`blygger-org`](https://github.com/blygger/blygger-org)).
 
