@@ -1,0 +1,34 @@
+{
+  // blygger.com — the blyg directory.
+  //
+  // NOT YET DEPLOYED. blygger.com is not onboarded to Cloudflare DNS, which is
+  // a dashboard action (add site + change nameservers at the registrar) the API
+  // token cannot perform. Everything here is ready for that moment; until then
+  // `wrangler dev` is the only way to run it.
+  //
+  // account_id is Venkat's PERSONAL account — the same one blygger.org's Pages
+  // project lives in, and deliberately NOT the Protocol Institute org account
+  // (blygger.com is the commercial-adjacent sibling; see blygger-spec decision
+  // records and Code/warnings-keys.md). It is an identifier, not a credential.
+  "name": "blygger-com",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-01",
+  "account_id": "7026b5d7c1ad16cb808987576bb07ab2",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "blygger-com",
+      // Placeholder — replace with the real id once `wrangler d1 create
+      // blygger-com` has run. Local dev and tests use miniflare's local D1 and
+      // never contact this id.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  // Once DNS is onboarded, a Custom Domain (not a Route) — it auto-provisions
+  // the DNS record, and this worker owns the whole origin so there is no path
+  // space to share. Same reasoning as self-host-plan.md §2.2.
+  "routes": [
+    { "pattern": "blygger.com", "custom_domain": true }
+  ]
+}

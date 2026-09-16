@@ -1,7 +1,15 @@
 # Status — blygger-com
 
 ## Active
-- Scaffolding only (session 6, 2026-07-24): repo created, no site content yet.
+- **Directory built** (session 21, 2026-09-16): single-page blyg directory —
+  submit box + approved listing, admin-gated review, submissions validated by
+  running blygger-spec's own v0.2 resolver. Worker + D1, 17 tests, `tsc` clean.
+  Verified locally against the two real live nodes (both resolved as `blyg`) and
+  simonwillison.net (correctly resolved as a plain feed).
+- **Not deployed.** Blocked on `blygger.com` DNS onboarding — a Cloudflare
+  dashboard action (add site, change nameservers at the registrar) that the API
+  token cannot perform. `wrangler.jsonc` is ready; the D1 id is a placeholder
+  until `wrangler d1 create blygger-com` runs.
 
 ## Upcoming
 - Stub landing page for blygger.com. The domain does not currently resolve.

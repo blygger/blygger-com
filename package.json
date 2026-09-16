@@ -1,0 +1,26 @@
+{
+  "name": "blygger-com",
+  "version": "0.1.0",
+  "private": true,
+  "description": "blygger.com — a directory of known blygs",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "test": "vitest run",
+    "deploy": "wrangler deploy",
+    "sync-vendor": "./scripts/sync-vendor.sh"
+  },
+  "dependencies": {
+    "fast-xml-parser": "5.10.1",
+    "hono": "4.12.30"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.18.6",
+    "@cloudflare/workers-types": "5.20260718.1",
+    "@types/node": "^26.1.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10",
+    "wrangler": "4.112.0"
+  },
+  "$note": "Versions pinned exactly to blygger-spec/worker's resolved tree. npm 10.9's peer resolver crashes (arborist edgesOut TypeError) on the vitest / vitest-pool-workers range combination when left to float; the worker project already knows a set that works together."
+}

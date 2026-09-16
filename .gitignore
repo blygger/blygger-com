@@ -1,5 +1,7 @@
+
+.dev.vars
 .DS_Store
 .env
-node_modules/
 .wrangler/
 dist/
+node_modules/
