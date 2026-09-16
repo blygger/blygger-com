@@ -7,9 +7,7 @@ One page: an *add your blyg* box, then a list of approved entries. Links go to
 each site's **home page, not its feed** — this is a directory of blygs, not a
 feed reader.
 
-**Status: built, not deployed.** `blygger.com` is not onboarded to Cloudflare
-DNS yet, which is a dashboard action the API token cannot perform. Run it
-locally with `npm run dev`.
+**Status: live** at [blygger.com](https://blygger.com) (deployed 2026-09-16).
 
 ## How a submission works
 

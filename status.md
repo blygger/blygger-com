@@ -6,10 +6,13 @@
   running blygger-spec's own v0.2 resolver. Worker + D1, 17 tests, `tsc` clean.
   Verified locally against the two real live nodes (both resolved as `blyg`) and
   simonwillison.net (correctly resolved as a plain feed).
-- **Not deployed.** Blocked on `blygger.com` DNS onboarding — a Cloudflare
-  dashboard action (add site, change nameservers at the registrar) that the API
-  token cannot perform. `wrangler.jsonc` is ready; the D1 id is a placeholder
-  until `wrangler d1 create blygger-com` runs.
+- **Deployed 2026-09-16** at [blygger.com](https://blygger.com). The earlier
+  "blocked on DNS onboarding" note was wrong: the zone was already active on the
+  personal account (Venkat had registered the domain through Cloudflare) — it
+  simply had nothing connected to it, and a failed `curl` was mistaken for a
+  missing zone. Worker + D1 provisioned, Custom Domain auto-created, secrets
+  registered in `Code/.env.keys`. Both live nodes submitted and awaiting approval
+  at `/admin`.
 
 ## Upcoming
 - Stub landing page for blygger.com. The domain does not currently resolve.

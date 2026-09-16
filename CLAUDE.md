@@ -55,6 +55,17 @@ bare `npm install vitest@4.1.10` in an empty directory, so it is the
 environment, not this project. Versions are pinned to blygger-spec/worker's
 known-good resolved tree. See `Code/warnings-node.md`.
 
+## Deployment
+
+Worker `blygger-com` on the **personal** Cloudflare account, D1 `blygger-com`,
+Custom Domain `blygger.com`. Secrets registered in `Code/.env.keys` as
+`BLYGGER_COM_OWNER_PASSWORD` / `BLYGGER_COM_COOKIE_SECRET`.
+
+```bash
+npx wrangler deploy
+npx wrangler d1 migrations apply blygger-com --remote   # when migrations change
+```
+
 ## Status
 
-See [`status.md`](status.md). **Not deployed** — blocked on DNS onboarding.
+See [`status.md`](status.md). Live since 2026-09-16.

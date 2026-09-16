@@ -1,11 +1,6 @@
 {
   // blygger.com — the blyg directory.
   //
-  // NOT YET DEPLOYED. blygger.com is not onboarded to Cloudflare DNS, which is
-  // a dashboard action (add site + change nameservers at the registrar) the API
-  // token cannot perform. Everything here is ready for that moment; until then
-  // `wrangler dev` is the only way to run it.
-  //
   // account_id is Venkat's PERSONAL account — the same one blygger.org's Pages
   // project lives in, and deliberately NOT the Protocol Institute org account
   // (blygger.com is the commercial-adjacent sibling; see blygger-spec decision
@@ -18,10 +13,7 @@
     {
       "binding": "DB",
       "database_name": "blygger-com",
-      // Placeholder — replace with the real id once `wrangler d1 create
-      // blygger-com` has run. Local dev and tests use miniflare's local D1 and
-      // never contact this id.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "ea8417e7-7547-47c0-82f7-9f298d545915",
       "migrations_dir": "migrations"
     }
   ],
