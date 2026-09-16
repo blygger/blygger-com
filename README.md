@@ -5,14 +5,15 @@ The protocol-adjacent commercial-development face of the
 decentralized public writing medium (fragments + threads + TK-transclusion over
 static files + RSS).
 
-`blygger.com` is a home for commercial work adjacent to the protocol. It will
-also run a live `/blyg` deployment — one of the two initial cross-client test
-instances (the other lives at [blygger.org](https://blygger.org),
-[`blygger-org`](https://github.com/blygger/blygger-org)).
+`blygger.com` is a home for commercial work adjacent to the protocol.
 
-**Status: not yet deployed.** This repo is currently a scaffold. See
-[`blygger-spec/docs/deploy-stub-sites-plan.md`](https://github.com/blygger/blygger-spec/blob/main/docs/deploy-stub-sites-plan.md)
-for the plan.
+**Status: not deployed.** This repo is a scaffold; the domain does not resolve.
+The session-6 scaffold described this as one of the two initial cross-client test
+instances, which is no longer true — session 11 put those on `venkateshrao.com/blyg/`
+and `blyg.protocol-institute.org`, and the two-node test network has been complete
+since. What remains here is a stub landing page, whose architecture half of
+[`deploy-stub-sites-plan.md`](https://github.com/blygger/blygger-spec/blob/main/docs/deploy-stub-sites-plan.md)
+is superseded by that outcome.
 
 ## License
 
