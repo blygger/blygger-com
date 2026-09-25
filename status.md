@@ -19,6 +19,20 @@
   lists publicly and the queue is empty — satisfying the last open line of
   `self-host-plan.md` §9's definition of done.
 
+- **First third-party listings approved** (2026-09-25, the day after the Symposium
+  talk): the directory now lists **five blygs and three plain feeds**, and the queue is
+  empty. Three of the blygs are strangers' — `jd-blyg.exe.xyz`, `blyg.aneeshsathe.com`
+  and `thinking.drwip.com` — all stood up from `blygger.org/start/` with no contact with
+  us, all serving conformant `blyg 0.3` manifests from `blyg-ref/0.3.0`. drwip is
+  **path-mounted at `/blyg/`** and was found through its `<link rel="blyg">`, which is
+  the first time decision #14's mount independence has been exercised by someone else.
+  One submission was **rejected as a duplicate**: `thinking.drwip.com` was submitted
+  twice, once resolving `blyg` and once resolving the root `rss.xml` as a plain feed —
+  the same publication, which would have listed one site under two badges.
+  **Directory weakness this exposed:** a `feed`-kind row has no title, so the three
+  plain feeds display as bare hostnames while blygs display their manifest title. The
+  resolver reads the feed's channel title at submission and the row does not keep it.
+
 ## Upcoming
 - ~~Stub landing page for blygger.com. The domain does not currently resolve.~~
   **Stale, corrected session 22 (2026-09-16):** superseded twice over — the domain
