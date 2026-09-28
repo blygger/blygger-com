@@ -1,6 +1,16 @@
 # Status — blygger-com
 
 ## Active
+- **An optional operator contact on submissions** (session 27, 2026-09-28, migration
+  `0002_contact.sql`, **needs `--remote` apply on deploy**). Added for a gap that had
+  already cost something: blygger-studio shipped a security fix to its public Webmention
+  endpoint, three of the nodes advertising that endpoint are strangers', this directory
+  publishes their origins — and the table held no way to reach any of them. Free text,
+  never published, admin-column only, and filled-if-empty on a re-submission so an
+  already-listed operator has a way in. `listApproved` now names its columns and returns
+  a `PublicRow`, so a private column cannot reach a public page by being added to a row
+  type. 19 tests, `tsc` clean. **The first notice still goes out by hand** — this only
+  helps from the next listing onward.
 - **Directory built** (session 21, 2026-09-16): single-page blyg directory —
   submit box + approved listing, admin-gated review, submissions validated by
   running blygger-spec's own v0.2 resolver. Worker + D1, 17 tests, `tsc` clean.

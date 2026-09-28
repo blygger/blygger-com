@@ -20,7 +20,7 @@ reference client, so there is nothing new to learn moving between them.
 |---|---|
 | `src/index.ts` | Routes. `GET /`, `POST /api/submit`, `/admin*`. |
 | `src/validate.ts` | Runs the v0.2 resolver against a submission. |
-| `src/store.ts` | Every D1 query. `listApproved` bakes in `status='approved'` so no code path can leak a pending row. |
+| `src/store.ts` | Every D1 query. `listApproved` bakes in `status='approved'` so no code path can leak a pending row, and names its columns so no code path can leak a private one. |
 | `src/pages.ts` | Public page, login page, admin queue. Server-rendered, no framework. |
 | `src/auth.ts` | Lifted from the reference client; only the cookie name differs. |
 | `src/vendor/` | **Copied** from `blygger-spec/worker/src/` — never edit here. |
@@ -35,6 +35,19 @@ Vendored code drifts silently; that script exists to make drift visible.
 
 Re-sync whenever blygger-spec's resolver changes — especially at v0.3, when
 resolution gains cross-client concerns.
+
+## Private columns
+
+Two columns are **admin-only and must never reach a rendered public page**:
+`admin_note`, and `contact` (migration 0002 — an optional operator email/handle,
+collected so that a security release in `blygger-studio` can actually be
+delivered to the people running it).
+
+The enforcement is structural rather than a rule to remember: `listApproved`
+selects `kind, title, home_url` by name and returns `PublicRow`, and
+`publicPage` takes `PublicRow` — not `SubmissionRow`. **Add a column to the
+public page deliberately or it is not public.** A test asserts a contact string
+is absent from `GET /` and present on the admin page.
 
 ## Conventions inherited from blygger-spec
 

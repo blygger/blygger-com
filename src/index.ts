@@ -8,7 +8,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { checkPassword, clearSessionCookie, issueSessionCookie, verifySession } from "./auth.ts";
 import { adminPage, loginPage, publicPage } from "./pages.ts";
-import { getByOrigin, insertSubmission, listApproved, listForReview, setStatus, getById } from "./store.ts";
+import { getByOrigin, insertSubmission, listApproved, listForReview, setContactIfEmpty, setStatus, getById } from "./store.ts";
 import type { Env } from "./types.ts";
 import { validateSubmission } from "./validate.ts";
 
@@ -32,10 +32,16 @@ app.get("/", async (c) => {
  * the single most useful thing this endpoint can tell them.
  */
 app.post("/api/submit", async (c) => {
-  const body = await c.req.json<{ url?: string }>().catch(() => ({}) as { url?: string });
+  type SubmitBody = { url?: string; contact?: string };
+  const body = await c.req.json<SubmitBody>().catch(() => ({}) as SubmitBody);
   const url = (body.url ?? "").trim();
   if (!url) return c.json({ message: "Give us a URL." }, 400);
   if (url.length > 2048) return c.json({ message: "That URL is implausibly long." }, 400);
+  // Optional and unvalidated beyond a length cap and whitespace: an email, a
+  // handle, a contact page — all of them fine. The purpose is a channel for a
+  // security release (migration 0002), not a verified identity, and demanding a
+  // format is how a courtesy field becomes a reason not to fill it in.
+  const contact = (body.contact ?? "").replace(/\s+/g, " ").trim().slice(0, 200) || null;
 
   const v = await validateSubmission(url);
 
@@ -57,6 +63,11 @@ app.post("/api/submit", async (c) => {
   if (v.origin) {
     const existing = await getByOrigin(c.env.DB, v.origin);
     if (existing) {
+      // A duplicate that brings a contact is worth something even though the
+      // listing is not: it is the only way an already-listed operator can give
+      // us one. Filled only when empty — a stranger re-submitting someone
+      // else's blyg must not be able to replace their contact with their own.
+      if (contact) await setContactIfEmpty(c.env.DB, existing.id, contact);
       return c.json({
         message:
           existing.status === "approved"
@@ -73,6 +84,7 @@ app.post("/api/submit", async (c) => {
     title: v.title,
     homeUrl: v.homeUrl,
     resolveNote: v.note,
+    contact,
   });
 
   return c.json({

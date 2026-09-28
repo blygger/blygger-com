@@ -97,6 +97,57 @@ describe("nothing is public until approved", () => {
   });
 });
 
+describe("operator contact (migration 0002) — collected, never published", () => {
+  const CONTACT = "operator@private.example";
+
+  it("reaches the owner's queue and never the public page", async () => {
+    const { insertSubmission } = await import("../src/store.ts");
+    const { adminPage } = await import("../src/pages.ts");
+    const { listForReview } = await import("../src/store.ts");
+    const id = await insertSubmission(env.DB, {
+      submittedUrl: "https://contact.example/blyg/",
+      kind: "blyg",
+      origin: "https://contact.example/blyg/",
+      title: "Contactable",
+      homeUrl: "https://contact.example/blyg/",
+      resolveNote: null,
+      contact: CONTACT,
+    });
+    await env.DB.prepare(`UPDATE submissions SET status = 'approved' WHERE id = ?`).bind(id).run();
+
+    // Listed, and the listing is the only thing that crossed over: the public
+    // query names its columns, so there is no path by which this string could
+    // be rendered even by a page that wanted to.
+    const publicHtml = await (await get("/")).text();
+    expect(publicHtml).toContain("Contactable");
+    expect(publicHtml).not.toContain(CONTACT);
+    expect(publicHtml).not.toContain("private.example");
+
+    expect(adminPage(await listForReview(env.DB))).toContain(CONTACT);
+    await env.DB.prepare(`DELETE FROM submissions WHERE id = ?`).bind(id).run();
+  });
+
+  it("a later submission fills an empty contact and never overwrites one", async () => {
+    const { insertSubmission, setContactIfEmpty, getById } = await import("../src/store.ts");
+    const blank = await insertSubmission(env.DB, {
+      submittedUrl: "https://quiet.example/blyg/",
+      kind: "blyg",
+      origin: "https://quiet.example/blyg/",
+      title: "Quiet",
+      homeUrl: "https://quiet.example/blyg/",
+      resolveNote: null,
+      contact: null,
+    });
+    await setContactIfEmpty(env.DB, blank, CONTACT);
+    expect((await getById(env.DB, blank))?.contact).toBe(CONTACT);
+
+    // The operator's own contact survives someone else submitting their blyg.
+    await setContactIfEmpty(env.DB, blank, "stranger@elsewhere.example");
+    expect((await getById(env.DB, blank))?.contact).toBe(CONTACT);
+    await env.DB.prepare(`DELETE FROM submissions WHERE id = ?`).bind(blank).run();
+  });
+});
+
 describe("admin is gated", () => {
   it("shows a login form to anonymous visitors, not the queue", async () => {
     const html = await (await get("/admin")).text();
@@ -177,6 +228,7 @@ describe("every inline script parses", () => {
           title: "A",
           home_url: "https://a.example/",
           resolve_note: null,
+          contact: "someone@a.example",
           status: "pending",
           submitted_at: "2026-09-16T00:00:00Z",
           reviewed_at: null,

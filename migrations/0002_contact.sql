@@ -1,0 +1,16 @@
+-- An optional, private way to reach the operator of a listing.
+--
+-- Added 2026-09-28 (session 27) for a reason that had already happened: the
+-- reference client shipped a security fix to its public Webmention endpoint, and
+-- of the third-party nodes advertising that endpoint — origins this directory
+-- publishes — we could not reach a single operator, because this table recorded
+-- no way to. Detection without delivery; the fix was hand-delivered by the one
+-- person who happened to know them.
+--
+-- Free text on purpose: an email, a handle, a contact page. Requiring a format
+-- would turn a courtesy into a form-validation argument.
+--
+-- **Never public.** The public listing selects its columns explicitly (store.ts)
+-- precisely so that this one cannot reach a page by someone adding a field to a
+-- row type. Admin-only, like `admin_note`.
+ALTER TABLE submissions ADD COLUMN contact TEXT;

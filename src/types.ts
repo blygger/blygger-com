@@ -16,4 +16,20 @@ export interface SubmissionRow {
   submitted_at: string;
   reviewed_at: string | null;
   admin_note: string | null;
+  /** Optional, operator-supplied, **never published** — see migration 0002. */
+  contact: string | null;
+}
+
+/**
+ * What the public page is allowed to know about a listing. Deliberately a
+ * different type from `SubmissionRow` rather than a subset of it by convention:
+ * the public query names these four columns and the page function takes this
+ * type, so a private column added to the table later cannot reach a public page
+ * by being added to a row type. `contact` is the column that made this worth
+ * enforcing in the types rather than in a code comment.
+ */
+export interface PublicRow {
+  kind: SubmissionRow["kind"];
+  title: string | null;
+  home_url: string | null;
 }

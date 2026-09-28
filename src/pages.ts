@@ -3,7 +3,7 @@
 // (monospace wordmark, orange accent, generous measure) so the two read as one
 // project without sharing a stylesheet across origins.
 
-import type { SubmissionRow } from "./types.ts";
+import type { PublicRow, SubmissionRow } from "./types.ts";
 import { escapeHtml } from "./util.ts";
 
 const STYLE = `
@@ -40,7 +40,7 @@ form.add label { display: block; font-family: var(--sans); font-size: 0.78rem;
   letter-spacing: 0.04em; text-transform: uppercase; color: var(--soft);
   margin-bottom: 0.5rem; }
 .row { display: flex; gap: 0.6rem; flex-wrap: wrap; }
-input[type=url], input[type=password] { flex: 1 1 18rem; min-width: 0; font: inherit;
+input[type=url], input[type=password], input[type=text] { flex: 1 1 18rem; min-width: 0; font: inherit;
   font-family: var(--sans); font-size: 0.9rem; padding: 0.55rem 0.7rem;
   border: 1px solid var(--rule); border-radius: 3px; background: var(--page);
   color: var(--ink); }
@@ -50,6 +50,8 @@ button { font-family: var(--sans); font-size: 0.88rem; padding: 0.55rem 1.1rem;
 button.ghost { background: transparent; color: var(--accent); }
 button:hover { filter: brightness(1.08); }
 .hint { font-size: 0.85rem; color: var(--soft); margin: 0.75rem 0 0; }
+form.add .field + .field { margin-top: 1.1rem; }
+form.add .field + .field label { margin-bottom: 0.4rem; }
 #msg { margin: 0.9rem 0 0; font-size: 0.9rem; }
 #msg.ok { color: #2a7d4f; } #msg.err { color: #b3412b; }
 
@@ -127,11 +129,12 @@ const SUBMIT_SCRIPT = `
     e.preventDefault();
     var url = document.getElementById('url').value.trim();
     if (!url) return;
+    var contact = (document.getElementById('contact') || {}).value || '';
     msg.className = ''; msg.textContent = 'Checking\\u2026';
     fetch('/api/submit', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ url: url })
+      body: JSON.stringify({ url: url, contact: contact.trim() })
     }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (res) {
         msg.className = res.ok ? 'ok' : 'err';
@@ -143,7 +146,7 @@ const SUBMIT_SCRIPT = `
 })();
 `;
 
-export function publicPage(rows: SubmissionRow[]): string {
+export function publicPage(rows: PublicRow[]): string {
   const items = rows
     .map((r) => {
       const home = r.home_url ?? "";
@@ -166,13 +169,26 @@ export function publicPage(rows: SubmissionRow[]): string {
 and a few plain feeds worth reading. Links go to the site itself, not to its feed.</p>
 
 <form class="add" id="add">
-  <label for="url">Add your blyg</label>
-  <div class="row">
-    <input type="url" id="url" name="url" placeholder="https://yoursite.com/blyg/" required>
-    <button type="submit">Submit</button>
+  <div class="field">
+    <label for="url">Add your blyg</label>
+    <div class="row">
+      <input type="url" id="url" name="url" placeholder="https://yoursite.com/blyg/" required>
+      <button type="submit">Submit</button>
+    </div>
+    <p class="hint">Your site URL or your feed URL — either works. We resolve it the way a
+      blyg client would, then a human looks at it before it appears here.</p>
   </div>
-  <p class="hint">Your site URL or your feed URL — either works. We resolve it the way a
-    blyg client would, then a human looks at it before it appears here.</p>
+  <div class="field">
+    <label for="contact">Contact (optional)</label>
+    <div class="row">
+      <input type="text" id="contact" name="contact" placeholder="email, handle, or a contact page"
+        autocomplete="email" maxlength="200">
+    </div>
+    <p class="hint"><strong>Never published, and never shown to anyone but us.</strong>
+      It is here for one purpose: if the software running your blyg gets a security
+      fix, this is how we tell you. A directory that publishes your origin and
+      cannot reach you is exactly the situation we were in this month.</p>
+  </div>
   <p id="msg"></p>
 </form>
 
@@ -219,7 +235,7 @@ export function adminPage(rows: SubmissionRow[]): string {
     ? `<h1>Review</h1>
 <p class="lede">${rows.filter((r) => r.status === "pending").length} pending of ${rows.length}.</p>
 <table class="review">
-<thead><tr><th>Site</th><th>Kind</th><th>Status</th><th></th></tr></thead>
+<thead><tr><th>Site</th><th>Kind</th><th>Contact</th><th>Status</th><th></th></tr></thead>
 <tbody>
 ${rows
   .map((r) => {
@@ -229,6 +245,7 @@ ${rows
   <td><a href="${escapeHtml(home)}">${escapeHtml(r.title?.trim() || hostOf(home))}</a>
       <div class="note">submitted: ${escapeHtml(r.submitted_url)}</div>${note}</td>
   <td>${escapeHtml(r.kind ?? "—")}</td>
+  <td class="note">${r.contact ? escapeHtml(r.contact) : "—"}</td>
   <td class="status-${escapeHtml(r.status)}">${escapeHtml(r.status)}</td>
   <td>
     ${r.status !== "approved" ? `<button data-act="approved" data-id="${escapeHtml(r.id)}">approve</button> ` : ""}
