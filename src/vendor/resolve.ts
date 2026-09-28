@@ -1,4 +1,4 @@
-// VENDORED from blygger-spec/worker/src/importer/resolve.ts — do not edit here.
+// VENDORED from blygger-studio/src/importer/resolve.ts — do not edit here.
 // Re-sync with scripts/sync-vendor.sh. See self-host-plan.md §7.
 
 // Resolution algorithm — v0.2-plan.md §2.1, locked decision #17. Given any

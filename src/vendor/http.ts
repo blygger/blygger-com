@@ -1,4 +1,4 @@
-// VENDORED from blygger-spec/worker/src/importer/http.ts — do not edit here.
+// VENDORED from blygger-studio/src/importer/http.ts — do not edit here.
 // Re-sync with scripts/sync-vendor.sh. See self-host-plan.md §7.
 
 // Injectable fetch abstraction shared by every importer module (resolve,
@@ -7,6 +7,8 @@
 // fetches) so resolution/poll logic is testable with plain deterministic
 // fixture stubs, not a real HTTP layer. platformFetch below is the
 // production implementation; tests inject their own FetchLike.
+
+import { GENERATOR } from "./util.ts";
 
 export interface FetchResult {
   ok: boolean;
@@ -17,14 +19,23 @@ export interface FetchResult {
   text(): Promise<string>;
 }
 
-export type FetchLike = (url: string, init?: { headers?: Record<string, string> }) => Promise<FetchResult>;
+export interface FetchInit {
+  headers?: Record<string, string>;
+  /** v0.3: Webmention discovery uses HEAD, and sending uses POST — the importer only ever GETs. */
+  method?: string;
+  body?: string;
+}
+
+export type FetchLike = (url: string, init?: FetchInit) => Promise<FetchResult>;
 
 /** Every outbound importer request carries this (§4.2). */
-export const IMPORTER_USER_AGENT = "blyg-ref/0.2 (+https://blygger.org)";
+export const IMPORTER_USER_AGENT = `${GENERATOR} (+https://blygger.com)`;
 
 export const platformFetch: FetchLike = async (url, init) => {
   const res = await fetch(url, {
     redirect: "follow",
+    method: init?.method ?? "GET",
+    body: init?.body,
     headers: { "User-Agent": IMPORTER_USER_AGENT, ...(init?.headers ?? {}) },
   });
   return {

@@ -1,4 +1,4 @@
-// VENDORED from blygger-spec/worker/src/importer/feed.ts — do not edit here.
+// VENDORED from blygger-studio/src/importer/feed.ts — do not edit here.
 // Re-sync with scripts/sync-vendor.sh. See self-host-plan.md §7.
 
 // Lenient feed parser — v0.2-plan.md §3.2 step 2 + §7's blyg:manifest
