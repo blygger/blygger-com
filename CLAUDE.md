@@ -79,6 +79,34 @@ npx wrangler deploy
 npx wrangler d1 migrations apply blygger-com --remote   # when migrations change
 ```
 
+## TODO
+
+- [ ] **Close the loop on warnings — how does an operator ever learn they have one?**
+  (Venkat, session 29.) Listing now warns rather than holds, which means a
+  stale manifest `site`, a plaintext link or an unreachable host gets published
+  *and stays that way*, because the only moment the operator sees the warning is
+  the second they submit. That is the wrong shape: the warning describes
+  something only they can fix, and we have no way to nudge them.
+
+  What needs deciding, roughly in this order:
+  1. **Does a listing carry its warnings publicly?** A quiet "served over HTTP"
+     beside an entry is honest and is pressure; it is also us editorialising
+     about someone else's site on our page. Probably yes for facts a reader
+     cares about (plaintext, unreachable) and no for the rest.
+  2. **Re-checking on a schedule.** Warnings are frozen at submission, so an
+     operator who fixes their site is still marked. A cron that re-resolves
+     each listing and rewrites its warnings makes them true, and makes "fixed"
+     observable. Cheap: the resolver is six fetches and the list is ~20 rows.
+  3. **Telling them.** We collect an optional contact for security releases
+     (migration 0002) and have never used it. A warning is not a security
+     release, so reusing that channel needs a decision, not an assumption.
+  4. **A per-listing page.** There is nowhere to send someone to see their own
+     entry. That is the missing piece under all of the above — "check your
+     directory entry" presumes an entry to check.
+
+  Do not build 2–4 before 1: whether warnings are public changes what the rest
+  of it is for.
+
 ## Status
 
 See [`status.md`](status.md). Live since 2026-09-16.

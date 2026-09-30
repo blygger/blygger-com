@@ -13,7 +13,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { checkPassword, clearSessionCookie, issueSessionCookie, verifySession } from "./auth.ts";
 import { adminPage, loginPage, publicPage } from "./pages.ts";
-import { applyRecheck, getByOrigin, insertSubmission, listApproved, listedTitles, listForReview, listPending, setContactIfEmpty, setStatus, getById } from "./store.ts";
+import { applyRecheck, getByOrigin, insertSubmission, listApproved, listedOrigins, listForReview, listPending, setContactIfEmpty, setStatus, getById } from "./store.ts";
 import { reviewReason } from "./review.ts";
 import type { Env } from "./types.ts";
 import { validateSubmission } from "./validate.ts";
@@ -83,10 +83,10 @@ app.post("/api/submit", async (c) => {
     }
   }
 
-  const { reason } = reviewReason({
+  const { block, warnings } = reviewReason({
     submittedUrl: url,
     validated: v,
-    listedTitles: await listedTitles(c.env.DB),
+    listedOrigins: await listedOrigins(c.env.DB),
   });
 
   await insertSubmission(c.env.DB, {
@@ -97,18 +97,19 @@ app.post("/api/submit", async (c) => {
     homeUrl: v.homeUrl,
     resolveNote: v.note,
     contact,
-    reviewReason: reason,
+    reviewReason: block,
+    warnings,
   });
 
   const what = v.kind === "blyg" ? "Resolved as a blyg" : "Resolved as a feed (not a blyg)";
-  // The submitter is told which of the two happened, and told *why* when it is
-  // the second. A held submission with no reason reads as rejection.
+  // Warnings go back to the submitter at the moment they submit, which is the
+  // only moment we reliably have their attention — and they are things only the
+  // operator can fix. Listing is not withheld for them.
   return c.json({
-    message: reason
-      ? `${what}. Held for review — thanks.`
-      : `${what}. Listed — thanks.`,
-    detail: reason ?? undefined,
-    listed: !reason,
+    message: block ? `${what}. Held for review — thanks.` : `${what}. Listed — thanks.`,
+    detail: block ?? undefined,
+    warnings,
+    listed: !block,
   });
 });
 
@@ -168,12 +169,13 @@ app.post("/admin/review/:id", async (c) => {
 app.post("/admin/recheck", async (c) => {
   if (!(await requireOwner(c))) return c.json({ error: "unauthorized" }, 401);
   const pending = await listPending(c.env.DB);
-  const titles = await listedTitles(c.env.DB);
+  const origins = await listedOrigins(c.env.DB);
   const listed: string[] = [];
   const held: { id: string; title: string | null; reason: string }[] = [];
+  let warned = 0;
 
   for (const row of pending) {
-    const { reason } = reviewReason({
+    const { block, warnings } = reviewReason({
       submittedUrl: row.submitted_url,
       validated: {
         kind: (row.kind ?? "failure") as "blyg" | "rss" | "failure",
@@ -182,20 +184,20 @@ app.post("/admin/recheck", async (c) => {
         homeUrl: row.home_url,
         note: row.resolve_note,
       },
-      listedTitles: titles,
+      listedOrigins: origins,
     });
-    await applyRecheck(c.env.DB, row.id, reason);
-    if (reason) {
-      held.push({ id: row.id, title: row.title, reason });
+    await applyRecheck(c.env.DB, row.id, block, warnings);
+    if (block) {
+      held.push({ id: row.id, title: row.title, reason: block });
     } else {
       listed.push(row.id);
-      // A name becomes taken the moment it is listed, so a second queued row
-      // with the same name is caught by this same pass rather than by the next.
-      if (row.title?.trim()) titles.add(row.title.trim().toLowerCase());
+      if (warnings.length) warned++;
+      // A newly listed origin is a neighbour for the rest of the pass.
+      if (row.origin) origins.add(row.origin);
     }
   }
 
-  return c.json({ ok: true, checked: pending.length, listed: listed.length, held });
+  return c.json({ ok: true, checked: pending.length, listed: listed.length, warned, held });
 });
 
 export default app;

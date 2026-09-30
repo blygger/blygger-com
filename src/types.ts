@@ -24,6 +24,8 @@ export interface SubmissionRow {
    * those were queued by the old blanket rule, not by a finding about them.
    */
   review_reason: string | null;
+  /** JSON array of operator-facing findings (migration 0004); null on older rows. */
+  warnings: string | null;
 }
 
 /**

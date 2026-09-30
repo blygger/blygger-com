@@ -52,6 +52,13 @@ button:hover { filter: brightness(1.08); }
 .hint { font-size: 0.85rem; color: var(--soft); margin: 0.75rem 0 0; }
 form.add .field + .field { margin-top: 1.1rem; }
 form.add .repo-note { margin-top: 1.1rem; padding-top: 0.9rem; border-top: 1px solid var(--rule); }
+#msg .detail { font-size: 0.85rem; color: var(--soft); margin: 0.3rem 0 0; }
+#msg .warnings { margin-top: 0.7rem; border-left: 3px solid var(--accent); padding: 0.1rem 0 0.1rem 0.75rem; }
+#msg .warnings-head { font-family: var(--sans); font-size: 0.8rem; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--accent); margin: 0 0 0.3rem; }
+#msg .warnings ul { margin: 0; padding-left: 1.1rem; font-size: 0.88rem; }
+#msg .warnings li + li { margin-top: 0.35rem; }
+table.review .note.warn { color: var(--accent); }
 form.add .field + .field label { margin-bottom: 0.4rem; }
 #msg { margin: 0.9rem 0 0; font-size: 0.9rem; }
 #msg.ok { color: #2a7d4f; } #msg.err { color: #b3412b; }
@@ -141,6 +148,35 @@ const SUBMIT_SCRIPT = `
       .then(function (res) {
         msg.className = res.ok ? 'ok' : 'err';
         msg.textContent = res.j.message || (res.ok ? 'Submitted.' : 'Something went wrong.');
+        if (res.j.detail && !res.j.listed) {
+          var d = document.createElement('p');
+          d.className = 'detail';
+          d.textContent = res.j.detail;
+          msg.appendChild(d);
+        }
+        // Warnings are things only the operator can fix, and this is the one
+        // moment we reliably have their attention. The listing is not withheld
+        // for them, so the wording has to say both: you are in, and here is
+        // what to sort out.
+        var w = res.j.warnings || [];
+        if (w.length) {
+          var box = document.createElement('div');
+          box.className = 'warnings';
+          var h = document.createElement('p');
+          h.className = 'warnings-head';
+          h.textContent = w.length === 1
+            ? 'Listed, with one thing to look at:'
+            : 'Listed, with ' + w.length + ' things to look at:';
+          box.appendChild(h);
+          var ul = document.createElement('ul');
+          w.forEach(function (line) {
+            var li = document.createElement('li');
+            li.textContent = line;
+            ul.appendChild(li);
+          });
+          box.appendChild(ul);
+          msg.appendChild(box);
+        }
         if (res.ok) f.reset();
       })
       .catch(function () { msg.className = 'err'; msg.textContent = 'Network error \\u2014 try again.'; });
@@ -275,9 +311,20 @@ ${rows
     // Why this one is waiting. Without it the queue is a list of things that
     // look fine, and the reviewer has to re-derive the finding that held them.
     const held = r.review_reason ? `<div class="note held">held: ${escapeHtml(r.review_reason)}</div>` : "";
+    // Listed-with-warnings rows are the common case now, and the queue is where
+    // we would notice a warning nobody ever acts on.
+    let warned = "";
+    try {
+      const w = JSON.parse(r.warnings ?? "[]") as string[];
+      if (Array.isArray(w) && w.length) {
+        warned = `<div class="note warn">${w.map((x) => escapeHtml(x)).join("<br>")}</div>`;
+      }
+    } catch {
+      warned = "";
+    }
     return `<tr>
   <td><a href="${escapeHtml(home)}">${escapeHtml(r.title?.trim() || hostOf(home))}</a>
-      <div class="note">submitted: ${escapeHtml(r.submitted_url)}</div>${note}${held}</td>
+      <div class="note">submitted: ${escapeHtml(r.submitted_url)}</div>${note}${held}${warned}</td>
   <td>${escapeHtml(r.kind ?? "—")}</td>
   <td class="note">${r.contact ? escapeHtml(r.contact) : "—"}</td>
   <td class="status-${escapeHtml(r.status)}">${escapeHtml(r.status)}</td>

@@ -49,21 +49,35 @@ export async function listPending(db: D1Database): Promise<SubmissionRow[]> {
  * same moment, and the one thing it must never do is reopen or re-approve
  * something already decided.
  */
-export async function applyRecheck(db: D1Database, id: string, reason: string | null): Promise<void> {
+export async function applyRecheck(
+  db: D1Database,
+  id: string,
+  reason: string | null,
+  warnings: string[],
+): Promise<void> {
+  const json = JSON.stringify(warnings);
   if (reason) {
     await db
-      .prepare(`UPDATE submissions SET review_reason = ? WHERE id = ? AND status = 'pending'`)
-      .bind(reason, id)
+      .prepare(`UPDATE submissions SET review_reason = ?, warnings = ? WHERE id = ? AND status = 'pending'`)
+      .bind(reason, json, id)
       .run();
     return;
   }
   await db
     .prepare(
-      `UPDATE submissions SET status = 'approved', reviewed_at = ?, review_reason = NULL
+      `UPDATE submissions SET status = 'approved', reviewed_at = ?, review_reason = NULL, warnings = ?
        WHERE id = ? AND status = 'pending'`,
     )
-    .bind(nowIso(), id)
+    .bind(nowIso(), json, id)
     .run();
+}
+
+/** Origins already listed — the input to the one mismatch check that is not ambiguous. */
+export async function listedOrigins(db: D1Database): Promise<Set<string>> {
+  const { results } = await db
+    .prepare(`SELECT origin FROM submissions WHERE status = 'approved' AND origin IS NOT NULL`)
+    .all<{ origin: string }>();
+  return new Set((results ?? []).map((r) => r.origin));
 }
 
 export async function getByOrigin(db: D1Database, origin: string): Promise<SubmissionRow | null> {
@@ -82,8 +96,10 @@ export interface NewSubmission {
   homeUrl: string | null;
   resolveNote: string | null;
   contact: string | null;
-  /** Why a human must look at this one; `null` lists it immediately. */
+  /** A confirmed attack; `null` lists it. The only thing that keeps a row out. */
   reviewReason: string | null;
+  /** Ambiguous findings, shown to the operator. Listed regardless. */
+  warnings: string[];
 }
 
 /**
@@ -100,24 +116,12 @@ export async function insertSubmission(db: D1Database, s: NewSubmission): Promis
   await db
     .prepare(
       `INSERT INTO submissions
-         (id, submitted_url, kind, origin, title, home_url, resolve_note, status, submitted_at, contact, review_reason)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, submitted_url, kind, origin, title, home_url, resolve_note, status, submitted_at, contact, review_reason, warnings)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(id, s.submittedUrl, s.kind, s.origin, s.title, s.homeUrl, s.resolveNote, status, nowIso(), s.contact, s.reviewReason)
+    .bind(id, s.submittedUrl, s.kind, s.origin, s.title, s.homeUrl, s.resolveNote, status, nowIso(), s.contact, s.reviewReason, JSON.stringify(s.warnings))
     .run();
   return id;
-}
-
-/**
- * The names already on the public list, lowercased — the input to review.ts's
- * impersonation check. Approved only: a name waiting in the queue has not been
- * published, so it is not yet something another listing could be confused with.
- */
-export async function listedTitles(db: D1Database): Promise<Set<string>> {
-  const { results } = await db
-    .prepare(`SELECT title FROM submissions WHERE status = 'approved' AND title IS NOT NULL AND title != ''`)
-    .all<{ title: string }>();
-  return new Set((results ?? []).map((r) => r.title.trim().toLowerCase()));
 }
 
 /**

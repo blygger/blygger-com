@@ -117,6 +117,7 @@ describe("operator contact (migration 0002) — collected, never published", () 
       resolveNote: null,
       contact: CONTACT,
       reviewReason: null,
+      warnings: [],
     });
     await env.DB.prepare(`UPDATE submissions SET status = 'approved' WHERE id = ?`).bind(id).run();
 
@@ -142,6 +143,7 @@ describe("operator contact (migration 0002) — collected, never published", () 
       homeUrl: "https://quiet.example/blyg/",
       resolveNote: null,
       reviewReason: null,
+      warnings: [],
       contact: null,
     });
     await setContactIfEmpty(env.DB, blank, CONTACT);
@@ -235,6 +237,7 @@ describe("every inline script parses", () => {
           home_url: "https://a.example/",
           resolve_note: null,
           review_reason: null,
+          warnings: null,
           contact: "someone@a.example",
           status: "pending",
           submitted_at: "2026-09-16T00:00:00Z",
@@ -338,7 +341,15 @@ describe("a plain feed gets a name, not a hostname", () => {
 // review.ts's checks is listed immediately. That makes these tests the gate
 // itself — every case below is one where a listing could deceive or misdirect a
 // reader, and a regression here publishes it instead of queuing it.
-describe("what gets listed automatically", () => {
+describe("block, warn, or clean", () => {
+  // Venkat, session 29, after the first version held two harmless submissions:
+  // "I'm not going to chase down harmless failures personally. Hold back should
+  //  be for confirmed security issues. Others can be released with a warning."
+  //
+  // The line is CONFIRMED vs AMBIGUOUS, not severe vs mild. A reviewer cannot
+  // tell a homograph domain from a legitimate non-Latin one, or a hijacked
+  // manifest from a site that moved — so those warn. Only acts nobody performs
+  // by accident block.
   const ok = (over: Partial<import("../src/validate.ts").Validated> = {}) => ({
     kind: "blyg" as const,
     origin: "https://clean.example/blyg/",
@@ -348,79 +359,95 @@ describe("what gets listed automatically", () => {
     ...over,
   });
 
-  async function verdict(v: any, listedTitles?: Set<string>) {
+  async function verdict(v: any, listedOrigins?: Set<string>) {
     const { reviewReason } = await import("../src/review.ts");
-    return reviewReason({ submittedUrl: v.homeUrl ?? "https://clean.example/", validated: v, listedTitles });
+    return reviewReason({ submittedUrl: v.homeUrl ?? "https://clean.example/", validated: v, listedOrigins });
   }
 
-  it("lists a clean blyg with no human in the loop", async () => {
-    expect((await verdict(ok())).reason).toBeNull();
+  it("a clean submission is listed with nothing to say", async () => {
+    const r = await verdict(ok());
+    expect(r.block).toBeNull();
+    expect(r.warnings).toEqual([]);
   });
 
-  it("lists a clean plain feed too", async () => {
-    expect(
-      (await verdict(ok({ kind: "rss", title: "A Feed", origin: "https://feed.example/rss.xml" }))).reason,
-    ).toBeNull();
+  it("a clean plain feed too", async () => {
+    const r = await verdict(ok({ kind: "rss", title: "A Feed", origin: "https://feed.example/rss.xml" }));
+    expect(r.block).toBeNull();
+    expect(r.warnings).toEqual([]);
   });
 
-  it("holds a manifest that asserts someone else's origin", async () => {
-    // Decision #17: identity is the fetch origin, never the manifest's claim.
-    // A directory is exactly where inheriting someone's identity pays off.
-    const { reason } = await verdict(
-      ok({ note: "manifest asserts site https://original.example/blyg/, served from https://mirror.example/blyg/" }),
-    );
-    expect(reason).toContain("origin mismatch");
+  describe("blocked — nobody does these by accident", () => {
+    it("credentials in the URL", async () => {
+      const r = await verdict(ok({ homeUrl: "https://user:pw@creds.example/", origin: "https://creds.example/" }));
+      expect(r.block).toContain("credentials");
+    });
+
+    it("a direction-override character in the title", async () => {
+      // There is no innocent reason to put one in a display name; its only
+      // effect is to make the name render as something it is not.
+      const r = await verdict(ok({ title: "Innocent\u202Egnilb suoicilam" }));
+      expect(r.block).toContain("direction-override");
+    });
+
+    it("a manifest claiming an origin that is already someone else's listing", async () => {
+      const r = await verdict(
+        ok({ note: "manifest asserts site https://neighbour.example/blyg/, served from https://impostor.example/blyg/" }),
+        new Set(["https://neighbour.example/"]),
+      );
+      expect(r.block).toContain("another listing here");
+    });
   });
 
-  it("holds a plaintext link", async () => {
-    const { reason } = await verdict(ok({ homeUrl: "http://insecure.example/", origin: "http://insecure.example/" }));
-    expect(reason).toContain("HTTPS");
+  describe("warned — listed anyway, and the operator is told", () => {
+    it("a stale manifest site that names nobody here", async () => {
+      // The [jdbb] case: an operator moved domains and did not update `site`.
+      // Ambiguous by nature, harmless in fact, and not ours to adjudicate.
+      const r = await verdict(
+        ok({ note: "manifest asserts site https://old.example/blyg/, served from https://new.example/blyg/" }),
+      );
+      expect(r.block).toBeNull();
+      expect(r.warnings.join(" ")).toContain("site");
+    });
+
+    it("plain HTTP", async () => {
+      const r = await verdict(ok({ homeUrl: "http://insecure.example/", origin: "http://insecure.example/" }));
+      expect(r.block).toBeNull();
+      expect(r.warnings.join(" ")).toContain("TLS");
+    });
+
+    it("a private or loopback host — broken, not dangerous", async () => {
+      const r = await verdict(ok({ homeUrl: "https://192.168.1.9/", origin: "https://192.168.1.9/" }));
+      expect(r.block).toBeNull();
+      expect(r.warnings.join(" ")).toMatch(/private|reach/);
+    });
+
+    it("a bare IP address", async () => {
+      const r = await verdict(ok({ homeUrl: "https://93.184.216.34/", origin: "https://93.184.216.34/" }));
+      expect(r.block).toBeNull();
+      expect(r.warnings.join(" ")).toContain("bare IP");
+    });
+
+    it("an internationalised hostname — noted, never held", async () => {
+      // Flagging every non-Latin-script publication for manual review would
+      // make waiting the default for exactly one part of the world.
+      const r = await verdict(ok({ homeUrl: "https://xn--80ak6aa92e.example/", origin: "https://xn--80ak6aa92e.example/" }));
+      expect(r.block).toBeNull();
+      expect(r.warnings.join(" ")).toContain("internationalised");
+    });
+
+    it("collects more than one when more than one applies", async () => {
+      const r = await verdict(ok({ homeUrl: "http://192.168.1.9/", origin: "http://192.168.1.9/" }));
+      expect(r.block).toBeNull();
+      expect(r.warnings.length).toBeGreaterThan(1);
+    });
   });
 
-  it.each([
-    ["http://localhost:8787/", "localhost"],
-    ["https://thing.local/", "local"],
-    ["https://10.0.0.5/", "10.0.0.5"],
-    ["https://192.168.1.9/", "192.168"],
-    ["https://127.0.0.1/", "127.0.0.1"],
-  ])("holds %s — a public directory does not send readers there", async (home) => {
-    const { reason } = await verdict(ok({ homeUrl: home, origin: home }));
-    expect(reason).not.toBeNull();
-  });
-
-  it("holds a bare IP address", async () => {
-    const { reason } = await verdict(ok({ homeUrl: "https://93.184.216.34/", origin: "https://93.184.216.34/" }));
-    expect(reason).toContain("IP address");
-  });
-
-  it("holds a URL carrying credentials", async () => {
-    const { reason } = await verdict(
-      ok({ homeUrl: "https://user:pw@creds.example/", origin: "https://creds.example/" }),
-    );
-    expect(reason).toContain("credentials");
-  });
-
-  it("holds an internationalised hostname for a human to read", async () => {
-    // Legitimate and common — and also how a homograph attack is spelled. A
-    // machine cannot tell those apart; a person can.
-    const { reason } = await verdict(ok({ homeUrl: "https://xn--80ak6aa92e.example/", origin: "https://xn--80ak6aa92e.example/" }));
-    expect(reason).toContain("internationalised");
-  });
-
-  it("holds a title that can reorder itself on the page", async () => {
-    const { reason } = await verdict(ok({ title: "Innocent‮gnilb suoicilam" }));
-    expect(reason).toContain("direction-override");
-  });
-
-  it("holds a title another listing already uses", async () => {
-    // The simplest impersonation there is, and invisible to every origin check
-    // above because the origin really is different.
-    const { reason } = await verdict(ok({ title: "Protocol Institute Blyg" }), new Set(["protocol institute blyg"]));
-    expect(reason).toContain("already uses the name");
-  });
-
-  it("does not hold a title that merely differs in case or spacing from its own", async () => {
-    expect((await verdict(ok({ title: "Clean Blyg" }), new Set(["something else"]))).reason).toBeNull();
+  it("lists a name another listing already uses — the domain is the discriminator", async () => {
+    // "blyg as name is people setting lazy defaults… There can be 2 'Joe's
+    // blyg' sites." The names that collide are unchosen defaults, which is the
+    // reference client's defect to fix, not a stranger's to be queued for.
+    expect((await verdict(ok({ title: "Joe's blyg" }))).block).toBeNull();
+    expect((await verdict(ok({ title: "blyg" }))).block).toBeNull();
   });
 });
 
@@ -435,12 +462,13 @@ describe("the decision is made in one place", () => {
       homeUrl: "https://mirror.example/blyg/",
       resolveNote: null,
       contact: null,
-      reviewReason: "origin mismatch — manifest asserts site https://original.example/blyg/",
+      reviewReason: "URL contains credentials",
+      warnings: [],
     });
     const { getById } = await import("../src/store.ts");
     const row = await getById(env.DB, id);
     expect(row?.status).toBe("pending");
-    expect(row?.review_reason).toContain("origin mismatch");
+    expect(row?.review_reason).toContain("credentials");
     expect(await (await get("/")).text()).not.toContain("Held Site");
     await env.DB.prepare(`DELETE FROM submissions WHERE id = ?`).bind(id).run();
   });
@@ -456,6 +484,7 @@ describe("the decision is made in one place", () => {
       resolveNote: null,
       contact: null,
       reviewReason: null,
+      warnings: [],
     });
     const { getById } = await import("../src/store.ts");
     expect((await getById(env.DB, id))?.status).toBe("approved");
@@ -463,21 +492,6 @@ describe("the decision is made in one place", () => {
     await env.DB.prepare(`DELETE FROM submissions WHERE id = ?`).bind(id).run();
   });
 
-  it("only approved names count as taken, so a queued one cannot block a real listing", async () => {
-    const { insertSubmission, listedTitles } = await import("../src/store.ts");
-    const held = await insertSubmission(env.DB, {
-      submittedUrl: "https://held.example/",
-      kind: "blyg",
-      origin: "https://held.example/",
-      title: "Not Yet Public",
-      homeUrl: "https://held.example/",
-      resolveNote: null,
-      contact: null,
-      reviewReason: "held for some reason",
-    });
-    expect(await listedTitles(env.DB)).not.toContain("not yet public");
-    await env.DB.prepare(`DELETE FROM submissions WHERE id = ?`).bind(held).run();
-  });
 });
 
 // Applying the rules to the queue that predates them (Venkat: "run this on any
@@ -497,14 +511,14 @@ describe("rechecking the existing queue", () => {
   }
   const clean = async () => env.DB.prepare(`DELETE FROM submissions WHERE id LIKE 'rc%'`).run();
 
-  it("lists the clean ones and leaves the flagged ones queued, with reasons", async () => {
+  it("lists everything that is not an attack, recording warnings on the way", async () => {
     await queue([
       { id: "rc1", url: "https://good.example/blyg/", title: "Good One" },
       {
         id: "rc2",
-        url: "https://mirror.example/blyg/",
-        title: "Mirrored",
-        note: "manifest asserts site https://original.example/blyg/, served from https://mirror.example/blyg/",
+        url: "https://moved.example/blyg/",
+        title: "Moved House",
+        note: "manifest asserts site https://old.example/blyg/, served from https://moved.example/blyg/",
       },
       { id: "rc3", url: "http://plain.example/", title: "Plaintext" },
     ]);
@@ -513,19 +527,22 @@ describe("rechecking the existing queue", () => {
     const res = await postJson("/admin/recheck", {}, cookie);
     expect(res.status).toBe(200);
     const out = res.json;
+    // All three list: none is a confirmed attack. Two carry warnings.
     expect(out.checked).toBe(3);
-    expect(out.listed).toBe(1);
-    expect(out.held.map((h: any) => h.id).sort()).toEqual(["rc2", "rc3"]);
+    expect(out.listed).toBe(3);
+    expect(out.held).toHaveLength(0);
+    expect(out.warned).toBe(2);
 
     const { getById } = await import("../src/store.ts");
     expect((await getById(env.DB, "rc1"))?.status).toBe("approved");
-    expect((await getById(env.DB, "rc2"))?.status).toBe("pending");
-    expect((await getById(env.DB, "rc2"))?.review_reason).toContain("origin mismatch");
-    expect((await getById(env.DB, "rc3"))?.review_reason).toContain("HTTPS");
+    expect(JSON.parse((await getById(env.DB, "rc1"))?.warnings ?? "[]")).toEqual([]);
+    expect((await getById(env.DB, "rc2"))?.status).toBe("approved");
+    expect(JSON.parse((await getById(env.DB, "rc2"))?.warnings ?? "[]").join(" ")).toContain("site");
+    expect(JSON.parse((await getById(env.DB, "rc3"))?.warnings ?? "[]").join(" ")).toContain("TLS");
 
     const html = await (await get("/")).text();
     expect(html).toContain("Good One");
-    expect(html).not.toContain("Mirrored");
+    expect(html).toContain("Moved House");
     await clean();
   });
 
@@ -541,18 +558,15 @@ describe("rechecking the existing queue", () => {
     await clean();
   });
 
-  it("catches a duplicate name within the same pass", async () => {
+  it("lists two submissions sharing a name, because the domains differ", async () => {
     await queue([
       { id: "rc5", url: "https://first.example/", title: "Same Name" },
       { id: "rc6", url: "https://second.example/", title: "Same Name" },
     ]);
     const cookie = await login();
     const out = (await postJson("/admin/recheck", {}, cookie)).json;
-    // The first becomes a listing, which makes the name taken for the second —
-    // otherwise a bulk run is the one way to get two identical listings.
-    expect(out.listed).toBe(1);
-    expect(out.held).toHaveLength(1);
-    expect(out.held[0].reason).toContain("already uses the name");
+    expect(out.listed).toBe(2);
+    expect(out.held).toHaveLength(0);
     await clean();
   });
 

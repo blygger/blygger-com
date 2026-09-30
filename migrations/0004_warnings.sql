@@ -1,0 +1,11 @@
+-- Warnings (session 29). The gate went three-valued: block on a confirmed
+-- attack, warn on anything ambiguous, and list in both of the other two cases.
+--
+--   "I'm not going to chase down harmless failures personally. Hold back should
+--    be for confirmed security issues. Others can be released with a warning."
+--
+-- A JSON array of sentences addressed to the operator. NULL or '[]' means the
+-- submission was clean. Stored rather than recomputed because the finding was
+-- made against what resolution actually saw at submission time, and a later
+-- recheck should be able to show that the site has since been fixed.
+ALTER TABLE submissions ADD COLUMN warnings TEXT;
