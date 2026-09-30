@@ -40,8 +40,38 @@
   twice, once resolving `blyg` and once resolving the root `rss.xml` as a plain feed —
   the same publication, which would have listed one site under two badges.
   **Directory weakness this exposed:** a `feed`-kind row has no title, so the three
-  plain feeds display as bare hostnames while blygs display their manifest title. The
-  resolver reads the feed's channel title at submission and the row does not keep it.
+  plain feeds display as bare hostnames while blygs display their manifest title.
+  ~~The resolver reads the feed's channel title at submission and the row does not
+  keep it.~~ **That diagnosis was wrong, corrected session 29:** the vendored
+  resolver returns `{ kind: "rss", feedUrl }` and never surfaced a title at all, so
+  there was nothing to keep. **Fixed session 29** — the directory fetches the feed
+  once more at submission and reads its channel title itself, and the seven existing
+  untitled rows were backfilled. One (`www.wysr.xyz`) refused the fetch and correctly
+  stays a hostname.
+
+- **Session 29 (2026-09-29): listing became automatic, then softer.** Approval was a
+  human on every row; it is now a three-valued gate — **block / warn / clean** — with
+  the line at *confirmed versus ambiguous*, not severe versus mild (Venkat: "Hold back
+  should be for confirmed security issues. Others can be released with a warning").
+  Only two things block: a credential in a public URL, and a direction-override
+  character in a display name. Everything else lists and warns.
+
+  Two rules were written and withdrawn the same afternoon, both because they punished
+  strangers for things that were not attacks: a **name-collision** check (held a blyg
+  titled `blyg` — which was the reference client's own default, since fixed in
+  blygger-studio 0.8.3), and **"manifest claims an origin already listed here"** (held
+  `[jdbb] studio blyg`, whose manifest named the operator's own previous address after
+  a host move). The second is the lesson: if a rule cannot distinguish the innocent
+  case by inspection, it is ambiguous by definition and belongs in the warning tier.
+
+  `POST /admin/recheck` re-applies the rules to the queue and is idempotent, which is
+  how the queue is brought back into agreement when the rules change — it was run
+  three times this session as they did. **Queue is empty: 0 pending of 23.**
+  Migration 0003 adds `review_reason`, 0004 adds `warnings`.
+
+  The submit form also now points client authors at blygger.org's project template,
+  since submitting a *site* and submitting the *software* are different acts and
+  nothing said so.
 
 ## Upcoming
 - ~~Stub landing page for blygger.com. The domain does not currently resolve.~~
