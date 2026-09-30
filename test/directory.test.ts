@@ -359,9 +359,9 @@ describe("block, warn, or clean", () => {
     ...over,
   });
 
-  async function verdict(v: any, listedOrigins?: Set<string>) {
+  async function verdict(v: any) {
     const { reviewReason } = await import("../src/review.ts");
-    return reviewReason({ submittedUrl: v.homeUrl ?? "https://clean.example/", validated: v, listedOrigins });
+    return reviewReason({ submittedUrl: v.homeUrl ?? "https://clean.example/", validated: v });
   }
 
   it("a clean submission is listed with nothing to say", async () => {
@@ -389,19 +389,18 @@ describe("block, warn, or clean", () => {
       expect(r.block).toContain("direction-override");
     });
 
-    it("a manifest claiming an origin that is already someone else's listing", async () => {
-      const r = await verdict(
-        ok({ note: "manifest asserts site https://neighbour.example/blyg/, served from https://impostor.example/blyg/" }),
-        new Set(["https://neighbour.example/"]),
-      );
-      expect(r.block).toContain("another listing here");
-    });
+    // Nothing else. A mismatch onto a *listed* origin was blockable for about
+    // an hour, until the first real row it met was an operator who had moved
+    // hosts and left `site` pointing at their own old address — which the rule
+    // could not tell from an impostor. See the warning case below.
   });
 
   describe("warned — listed anyway, and the operator is told", () => {
-    it("a stale manifest site that names nobody here", async () => {
-      // The [jdbb] case: an operator moved domains and did not update `site`.
-      // Ambiguous by nature, harmless in fact, and not ours to adjudicate.
+    it("a stale manifest site — including one pointing at another listing", async () => {
+      // The [jdbb] case, exactly: an operator moved from an address that is
+      // itself listed here and did not update `site`. Indistinguishable from
+      // impersonation by inspection, overwhelmingly a move in practice, and
+      // blocking it would queue people for migrating domains.
       const r = await verdict(
         ok({ note: "manifest asserts site https://old.example/blyg/, served from https://new.example/blyg/" }),
       );

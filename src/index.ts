@@ -13,7 +13,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { checkPassword, clearSessionCookie, issueSessionCookie, verifySession } from "./auth.ts";
 import { adminPage, loginPage, publicPage } from "./pages.ts";
-import { applyRecheck, getByOrigin, insertSubmission, listApproved, listedOrigins, listForReview, listPending, setContactIfEmpty, setStatus, getById } from "./store.ts";
+import { applyRecheck, getByOrigin, insertSubmission, listApproved, listForReview, listPending, setContactIfEmpty, setStatus, getById } from "./store.ts";
 import { reviewReason } from "./review.ts";
 import type { Env } from "./types.ts";
 import { validateSubmission } from "./validate.ts";
@@ -83,11 +83,7 @@ app.post("/api/submit", async (c) => {
     }
   }
 
-  const { block, warnings } = reviewReason({
-    submittedUrl: url,
-    validated: v,
-    listedOrigins: await listedOrigins(c.env.DB),
-  });
+  const { block, warnings } = reviewReason({ submittedUrl: url, validated: v });
 
   await insertSubmission(c.env.DB, {
     submittedUrl: url,
@@ -169,7 +165,6 @@ app.post("/admin/review/:id", async (c) => {
 app.post("/admin/recheck", async (c) => {
   if (!(await requireOwner(c))) return c.json({ error: "unauthorized" }, 401);
   const pending = await listPending(c.env.DB);
-  const origins = await listedOrigins(c.env.DB);
   const listed: string[] = [];
   const held: { id: string; title: string | null; reason: string }[] = [];
   let warned = 0;
@@ -184,7 +179,6 @@ app.post("/admin/recheck", async (c) => {
         homeUrl: row.home_url,
         note: row.resolve_note,
       },
-      listedOrigins: origins,
     });
     await applyRecheck(c.env.DB, row.id, block, warnings);
     if (block) {
@@ -192,8 +186,6 @@ app.post("/admin/recheck", async (c) => {
     } else {
       listed.push(row.id);
       if (warnings.length) warned++;
-      // A newly listed origin is a neighbour for the rest of the pass.
-      if (row.origin) origins.add(row.origin);
     }
   }
 

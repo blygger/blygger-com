@@ -72,14 +72,6 @@ export async function applyRecheck(
     .run();
 }
 
-/** Origins already listed — the input to the one mismatch check that is not ambiguous. */
-export async function listedOrigins(db: D1Database): Promise<Set<string>> {
-  const { results } = await db
-    .prepare(`SELECT origin FROM submissions WHERE status = 'approved' AND origin IS NOT NULL`)
-    .all<{ origin: string }>();
-  return new Set((results ?? []).map((r) => r.origin));
-}
-
 export async function getByOrigin(db: D1Database, origin: string): Promise<SubmissionRow | null> {
   return db.prepare(`SELECT * FROM submissions WHERE origin = ?`).bind(origin).first<SubmissionRow>();
 }
