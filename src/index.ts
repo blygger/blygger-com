@@ -13,7 +13,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { checkPassword, clearSessionCookie, issueSessionCookie, verifySession } from "./auth.ts";
 import { adminPage, loginPage, publicPage } from "./pages.ts";
-import { getByOrigin, insertSubmission, listApproved, listedTitles, listForReview, setContactIfEmpty, setStatus, getById } from "./store.ts";
+import { applyRecheck, getByOrigin, insertSubmission, listApproved, listedTitles, listForReview, listPending, setContactIfEmpty, setStatus, getById } from "./store.ts";
 import { reviewReason } from "./review.ts";
 import type { Env } from "./types.ts";
 import { validateSubmission } from "./validate.ts";
@@ -146,6 +146,56 @@ app.post("/admin/review/:id", async (c) => {
   if (!(await getById(c.env.DB, id))) return c.json({ error: "not found" }, 404);
   await setStatus(c.env.DB, id, status, note);
   return c.json({ ok: true });
+});
+
+/**
+ * Re-run the listing rules over everything still queued.
+ *
+ * The queue predates automatic listing: every row in it was held by the old
+ * blanket "a human looks at everything" rule, not by a finding about that row.
+ * Leaving them there would mean the new policy applies only to submissions that
+ * happen to arrive after it shipped, which is not a policy, it is a start date.
+ *
+ * Idempotent and re-runnable, which is why this is an endpoint rather than a
+ * one-off script: the rules in `review.ts` will change, and when they do this is
+ * how the queue is brought back into agreement with them.
+ *
+ * It re-decides **only** rows that are still `pending`, and only from what was
+ * already stored — no refetching, so a recheck cannot be steered by what a
+ * third-party server returns today. A row whose flag still stands keeps its
+ * place in the queue and gains the reason.
+ */
+app.post("/admin/recheck", async (c) => {
+  if (!(await requireOwner(c))) return c.json({ error: "unauthorized" }, 401);
+  const pending = await listPending(c.env.DB);
+  const titles = await listedTitles(c.env.DB);
+  const listed: string[] = [];
+  const held: { id: string; title: string | null; reason: string }[] = [];
+
+  for (const row of pending) {
+    const { reason } = reviewReason({
+      submittedUrl: row.submitted_url,
+      validated: {
+        kind: (row.kind ?? "failure") as "blyg" | "rss" | "failure",
+        origin: row.origin,
+        title: row.title,
+        homeUrl: row.home_url,
+        note: row.resolve_note,
+      },
+      listedTitles: titles,
+    });
+    await applyRecheck(c.env.DB, row.id, reason);
+    if (reason) {
+      held.push({ id: row.id, title: row.title, reason });
+    } else {
+      listed.push(row.id);
+      // A name becomes taken the moment it is listed, so a second queued row
+      // with the same name is caught by this same pass rather than by the next.
+      if (row.title?.trim()) titles.add(row.title.trim().toLowerCase());
+    }
+  }
+
+  return c.json({ ok: true, checked: pending.length, listed: listed.length, held });
 });
 
 export default app;

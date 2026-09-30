@@ -32,6 +32,40 @@ export async function listForReview(db: D1Database): Promise<SubmissionRow[]> {
   return results ?? [];
 }
 
+/** Rows still waiting on a human — the input to a recheck. */
+export async function listPending(db: D1Database): Promise<SubmissionRow[]> {
+  const { results } = await db
+    .prepare(`SELECT * FROM submissions WHERE status = 'pending' ORDER BY submitted_at ASC`)
+    .all<SubmissionRow>();
+  return results ?? [];
+}
+
+/**
+ * Apply a recheck verdict to a queued row: approve it, or leave it queued with
+ * the reason now recorded.
+ *
+ * Guarded on `status = 'pending'` in SQL rather than by the caller checking
+ * first. A recheck is a bulk operation over rows a human may be reviewing at the
+ * same moment, and the one thing it must never do is reopen or re-approve
+ * something already decided.
+ */
+export async function applyRecheck(db: D1Database, id: string, reason: string | null): Promise<void> {
+  if (reason) {
+    await db
+      .prepare(`UPDATE submissions SET review_reason = ? WHERE id = ? AND status = 'pending'`)
+      .bind(reason, id)
+      .run();
+    return;
+  }
+  await db
+    .prepare(
+      `UPDATE submissions SET status = 'approved', reviewed_at = ?, review_reason = NULL
+       WHERE id = ? AND status = 'pending'`,
+    )
+    .bind(nowIso(), id)
+    .run();
+}
+
 export async function getByOrigin(db: D1Database, origin: string): Promise<SubmissionRow | null> {
   return db.prepare(`SELECT * FROM submissions WHERE origin = ?`).bind(origin).first<SubmissionRow>();
 }

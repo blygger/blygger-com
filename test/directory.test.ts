@@ -479,3 +479,94 @@ describe("the decision is made in one place", () => {
     await env.DB.prepare(`DELETE FROM submissions WHERE id = ?`).bind(held).run();
   });
 });
+
+// Applying the rules to the queue that predates them (Venkat: "run this on any
+// queued pending submissions"). The queue was held by the old blanket rule, not
+// by findings about those rows — leaving it there would make the new policy a
+// start date rather than a policy.
+describe("rechecking the existing queue", () => {
+  async function queue(rows: Array<Partial<Record<string, string>>>) {
+    for (const r of rows) {
+      await env.DB.prepare(
+        `INSERT INTO submissions (id, submitted_url, kind, origin, title, home_url, resolve_note, status, submitted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', '2026-09-16T00:00:00Z')`,
+      )
+        .bind(r.id, r.url, r.kind ?? "blyg", r.origin ?? r.url, r.title ?? null, r.home ?? r.url, r.note ?? null)
+        .run();
+    }
+  }
+  const clean = async () => env.DB.prepare(`DELETE FROM submissions WHERE id LIKE 'rc%'`).run();
+
+  it("lists the clean ones and leaves the flagged ones queued, with reasons", async () => {
+    await queue([
+      { id: "rc1", url: "https://good.example/blyg/", title: "Good One" },
+      {
+        id: "rc2",
+        url: "https://mirror.example/blyg/",
+        title: "Mirrored",
+        note: "manifest asserts site https://original.example/blyg/, served from https://mirror.example/blyg/",
+      },
+      { id: "rc3", url: "http://plain.example/", title: "Plaintext" },
+    ]);
+
+    const cookie = await login();
+    const res = await postJson("/admin/recheck", {}, cookie);
+    expect(res.status).toBe(200);
+    const out = res.json;
+    expect(out.checked).toBe(3);
+    expect(out.listed).toBe(1);
+    expect(out.held.map((h: any) => h.id).sort()).toEqual(["rc2", "rc3"]);
+
+    const { getById } = await import("../src/store.ts");
+    expect((await getById(env.DB, "rc1"))?.status).toBe("approved");
+    expect((await getById(env.DB, "rc2"))?.status).toBe("pending");
+    expect((await getById(env.DB, "rc2"))?.review_reason).toContain("origin mismatch");
+    expect((await getById(env.DB, "rc3"))?.review_reason).toContain("HTTPS");
+
+    const html = await (await get("/")).text();
+    expect(html).toContain("Good One");
+    expect(html).not.toContain("Mirrored");
+    await clean();
+  });
+
+  it("never touches a row a human already decided", async () => {
+    await queue([{ id: "rc4", url: "https://decided.example/", title: "Decided" }]);
+    await env.DB.prepare(`UPDATE submissions SET status = 'rejected' WHERE id = 'rc4'`).run();
+    const cookie = await login();
+    await postJson("/admin/recheck", {}, cookie);
+    const { getById } = await import("../src/store.ts");
+    // A recheck that could reopen a rejection would undo the reviewer's work
+    // in bulk, silently.
+    expect((await getById(env.DB, "rc4"))?.status).toBe("rejected");
+    await clean();
+  });
+
+  it("catches a duplicate name within the same pass", async () => {
+    await queue([
+      { id: "rc5", url: "https://first.example/", title: "Same Name" },
+      { id: "rc6", url: "https://second.example/", title: "Same Name" },
+    ]);
+    const cookie = await login();
+    const out = (await postJson("/admin/recheck", {}, cookie)).json;
+    // The first becomes a listing, which makes the name taken for the second —
+    // otherwise a bulk run is the one way to get two identical listings.
+    expect(out.listed).toBe(1);
+    expect(out.held).toHaveLength(1);
+    expect(out.held[0].reason).toContain("already uses the name");
+    await clean();
+  });
+
+  it("is idempotent — a second run changes nothing", async () => {
+    await queue([{ id: "rc7", url: "https://idem.example/", title: "Idempotent" }]);
+    const cookie = await login();
+    await postJson("/admin/recheck", {}, cookie);
+    const second = (await postJson("/admin/recheck", {}, cookie)).json;
+    expect(second.checked).toBe(0);
+    await clean();
+  });
+
+  it("refuses without a session", async () => {
+    const res = await postJson("/admin/recheck", {});
+    expect(res.status).toBe(401);
+  });
+});

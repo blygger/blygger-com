@@ -225,6 +225,23 @@ export function loginPage(error = false): string {
 
 const ADMIN_SCRIPT = `
 (function () {
+  // Re-run the listing rules over the whole queue. Reports what it did rather
+  // than reloading silently: a bulk action whose only feedback is a changed
+  // page is one you cannot tell succeeded from one that found nothing to do.
+  document.addEventListener('click', function (e) {
+    var r = e.target.closest('#recheck');
+    if (!r) return;
+    e.preventDefault();
+    r.disabled = true;
+    fetch('/admin/recheck', { method: 'POST' })
+      .then(function (res) { return res.ok ? res.json() : Promise.reject(); })
+      .then(function (out) {
+        if (!out.checked) { r.disabled = false; r.textContent = 'nothing queued'; return; }
+        location.reload();
+      })
+      .catch(function () { r.disabled = false; alert('Recheck failed.'); });
+  });
+
   document.addEventListener('click', function (e) {
     var b = e.target.closest('button[data-act]');
     if (!b) return;
@@ -246,7 +263,8 @@ const ADMIN_SCRIPT = `
 export function adminPage(rows: SubmissionRow[]): string {
   const body = rows.length
     ? `<h1>Review</h1>
-<p class="lede">${rows.filter((r) => r.status === "pending").length} pending of ${rows.length}.</p>
+<p class="lede">${rows.filter((r) => r.status === "pending").length} pending of ${rows.length}.
+  ${rows.some((r) => r.status === "pending") ? '<button class="ghost" id="recheck">recheck queue</button>' : ""}</p>
 <table class="review">
 <thead><tr><th>Site</th><th>Kind</th><th>Contact</th><th>Status</th><th></th></tr></thead>
 <tbody>
