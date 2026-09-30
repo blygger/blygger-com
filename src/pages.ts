@@ -51,6 +51,7 @@ button.ghost { background: transparent; color: var(--accent); }
 button:hover { filter: brightness(1.08); }
 .hint { font-size: 0.85rem; color: var(--soft); margin: 0.75rem 0 0; }
 form.add .field + .field { margin-top: 1.1rem; }
+form.add .repo-note { margin-top: 1.1rem; padding-top: 0.9rem; border-top: 1px solid var(--rule); }
 form.add .field + .field label { margin-bottom: 0.4rem; }
 #msg { margin: 0.9rem 0 0; font-size: 0.9rem; }
 #msg.ok { color: #2a7d4f; } #msg.err { color: #b3412b; }
@@ -74,6 +75,7 @@ footer { margin-top: 3.5rem; border-top: 1px solid var(--rule); padding-top: 1.1
 table.review { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 table.review td, table.review th { text-align: left; padding: 0.5rem 0.6rem 0.5rem 0;
   border-bottom: 1px solid var(--rule); vertical-align: top; }
+table.review .note.held { color: var(--accent); }
 table.review th { font-family: var(--sans); font-size: 0.72rem; text-transform: uppercase;
   letter-spacing: 0.05em; color: var(--soft); }
 .status-pending { color: var(--accent); } .status-approved { color: #2a7d4f; }
@@ -176,7 +178,10 @@ and a few plain feeds worth reading. Links go to the site itself, not to its fee
       <button type="submit">Submit</button>
     </div>
     <p class="hint">Your site URL or your feed URL — either works. We resolve it the way a
-      blyg client would, then a human looks at it before it appears here.</p>
+      blyg client would, and if it resolves cleanly it is listed straight away. A few
+      things hold a submission for a human to look at — a manifest claiming an origin it
+      is not served from, a plaintext link, a name another listing already uses — and
+      you are told which.</p>
   </div>
   <div class="field">
     <label for="contact">Contact (optional)</label>
@@ -190,6 +195,14 @@ and a few plain feeds worth reading. Links go to the site itself, not to its fee
       cannot reach you is exactly the situation we were in this month.</p>
   </div>
   <p id="msg"></p>
+  <p class="hint repo-note"><strong>Built or modified a client?</strong> That is a
+    different thing from the site you just submitted, and it belongs on the
+    <a href="https://blygger.org/ecosystem/">ecosystem page</a> —
+    <a href="https://github.com/blygger/blygger-org/issues/new?template=project.yml">submit the
+    repo here</a>. Half-finished is fine; so is someone else's, and we will check with
+    them. Worth doing even for a fork or a private mod: the census can see that
+    <em>some</em> client published a blyg, because the manifest carries a
+    <code>generator</code> string — it cannot see whose it is or where to read the code.</p>
 </form>
 
 <h2>Listed</h2>
@@ -241,9 +254,12 @@ ${rows
   .map((r) => {
     const home = r.home_url ?? r.submitted_url;
     const note = r.resolve_note ? `<div class="note">${escapeHtml(r.resolve_note)}</div>` : "";
+    // Why this one is waiting. Without it the queue is a list of things that
+    // look fine, and the reviewer has to re-derive the finding that held them.
+    const held = r.review_reason ? `<div class="note held">held: ${escapeHtml(r.review_reason)}</div>` : "";
     return `<tr>
   <td><a href="${escapeHtml(home)}">${escapeHtml(r.title?.trim() || hostOf(home))}</a>
-      <div class="note">submitted: ${escapeHtml(r.submitted_url)}</div>${note}</td>
+      <div class="note">submitted: ${escapeHtml(r.submitted_url)}</div>${note}${held}</td>
   <td>${escapeHtml(r.kind ?? "—")}</td>
   <td class="note">${r.contact ? escapeHtml(r.contact) : "—"}</td>
   <td class="status-${escapeHtml(r.status)}">${escapeHtml(r.status)}</td>

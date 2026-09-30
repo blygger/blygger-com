@@ -2,13 +2,19 @@
 //
 // Deliberately small surface: GET / lists approved entries, POST /api/submit
 // accepts a URL and resolves it, and everything under /admin is owner-gated.
-// Nothing is public until a human approves it.
+//
+// **Listing is automatic** as of session 29: a submission that resolves cleanly
+// and trips none of `review.ts`'s checks appears immediately, and the queue is
+// for the ones that could deceive or misdirect a reader. The gate used to be a
+// human on every row, which was right at five entries and became the bottleneck
+// on a thing whose point is that anyone can join.
 
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { checkPassword, clearSessionCookie, issueSessionCookie, verifySession } from "./auth.ts";
 import { adminPage, loginPage, publicPage } from "./pages.ts";
-import { getByOrigin, insertSubmission, listApproved, listForReview, setContactIfEmpty, setStatus, getById } from "./store.ts";
+import { getByOrigin, insertSubmission, listApproved, listedTitles, listForReview, setContactIfEmpty, setStatus, getById } from "./store.ts";
+import { reviewReason } from "./review.ts";
 import type { Env } from "./types.ts";
 import { validateSubmission } from "./validate.ts";
 
@@ -77,6 +83,12 @@ app.post("/api/submit", async (c) => {
     }
   }
 
+  const { reason } = reviewReason({
+    submittedUrl: url,
+    validated: v,
+    listedTitles: await listedTitles(c.env.DB),
+  });
+
   await insertSubmission(c.env.DB, {
     submittedUrl: url,
     kind: v.kind,
@@ -85,13 +97,18 @@ app.post("/api/submit", async (c) => {
     homeUrl: v.homeUrl,
     resolveNote: v.note,
     contact,
+    reviewReason: reason,
   });
 
+  const what = v.kind === "blyg" ? "Resolved as a blyg" : "Resolved as a feed (not a blyg)";
+  // The submitter is told which of the two happened, and told *why* when it is
+  // the second. A held submission with no reason reads as rejection.
   return c.json({
-    message:
-      v.kind === "blyg"
-        ? "Resolved as a blyg. Queued for review — thanks."
-        : "Resolved as a feed (not a blyg). Queued for review — thanks.",
+    message: reason
+      ? `${what}. Held for review — thanks.`
+      : `${what}. Listed — thanks.`,
+    detail: reason ?? undefined,
+    listed: !reason,
   });
 });
 

@@ -71,7 +71,11 @@ describe("validation runs the real resolver", () => {
   });
 });
 
-describe("nothing is public until approved", () => {
+// Renamed session 29: listing is automatic now, so "nothing is public until
+// approved" no longer describes the *policy*. What these three still pin is the
+// invariant underneath it, which did not change and must not — the public query
+// shows approved rows and nothing else, whoever set the status and whenever.
+describe("the public list shows approved rows and nothing else", () => {
   it("a submitted blyg does not appear on the public page", async () => {
     await env.DB.prepare(
       `INSERT INTO submissions (id, submitted_url, kind, origin, title, home_url, status, submitted_at)
@@ -112,6 +116,7 @@ describe("operator contact (migration 0002) — collected, never published", () 
       homeUrl: "https://contact.example/blyg/",
       resolveNote: null,
       contact: CONTACT,
+      reviewReason: null,
     });
     await env.DB.prepare(`UPDATE submissions SET status = 'approved' WHERE id = ?`).bind(id).run();
 
@@ -136,6 +141,7 @@ describe("operator contact (migration 0002) — collected, never published", () 
       title: "Quiet",
       homeUrl: "https://quiet.example/blyg/",
       resolveNote: null,
+      reviewReason: null,
       contact: null,
     });
     await setContactIfEmpty(env.DB, blank, CONTACT);
@@ -228,6 +234,7 @@ describe("every inline script parses", () => {
           title: "A",
           home_url: "https://a.example/",
           resolve_note: null,
+          review_reason: null,
           contact: "someone@a.example",
           status: "pending",
           submitted_at: "2026-09-16T00:00:00Z",
@@ -243,5 +250,232 @@ describe("every inline script parses", () => {
     const { loginPage } = await import("../src/pages.ts");
     // No script on the login page by design; assert that rather than skipping.
     expect(loginPage()).not.toContain("<script>");
+  });
+});
+
+// A plain feed's name. Before this, `validateSubmission` returned `title: null`
+// for every `rss` result, so the public list showed six feed rows as bare
+// hostnames beside blyg rows showing their real names. The resolver never
+// surfaced a title — status.md said it did, which was wrong — so the directory
+// fetches the feed once more at submission time and reads its channel title.
+describe("a plain feed gets a name, not a hostname", () => {
+  const RSS = `<?xml version="1.0"?><rss version="2.0"><channel>
+    <title>Adventure Capital</title><link>https://ac.example/</link>
+    <item><guid>1</guid><link>https://ac.example/one</link><title>One</title></item>
+  </channel></rss>`;
+
+  it("reads an RSS channel title", async () => {
+    const v = await validateSubmission(
+      "https://ac.example/feed.xml",
+      stubFetch({ "https://ac.example/feed.xml": { body: RSS, type: "application/rss+xml" } }),
+    );
+    expect(v.kind).toBe("rss");
+    expect(v.title).toBe("Adventure Capital");
+    // Unchanged: the directory lists home pages, so a feed row points at the
+    // feed's origin rather than at the XML.
+    expect(v.homeUrl).toBe("https://ac.example/");
+  });
+
+  it("reads an Atom feed title", async () => {
+    const atom = `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">
+      <title>Summer Lightning</title><id>urn:x</id>
+      <entry><id>urn:1</id><link href="https://sl.example/one"/><title>One</title></entry>
+    </feed>`;
+    const v = await validateSubmission(
+      "https://sl.example/atom.xml",
+      stubFetch({ "https://sl.example/atom.xml": { body: atom, type: "application/atom+xml" } }),
+    );
+    expect(v.kind).toBe("rss");
+    expect(v.title).toBe("Summer Lightning");
+  });
+
+  it("still lists the feed when it has no usable title", async () => {
+    const untitled = `<?xml version="1.0"?><rss version="2.0"><channel>
+      <link>https://x.example/</link>
+      <item><guid>1</guid><link>https://x.example/one</link></item>
+    </channel></rss>`;
+    const v = await validateSubmission(
+      "https://x.example/feed.xml",
+      stubFetch({ "https://x.example/feed.xml": { body: untitled, type: "application/rss+xml" } }),
+    );
+    // A missing title is cosmetic. It must never cost the listing — the page
+    // falls back to the hostname exactly as it did before.
+    expect(v.kind).toBe("rss");
+    expect(v.title).toBeNull();
+  });
+
+  it("does not adopt an item's title as the channel's", async () => {
+    const noChannelTitle = `<?xml version="1.0"?><rss version="2.0"><channel>
+      <link>https://y.example/</link>
+      <item><guid>1</guid><link>https://y.example/one</link><title>A post, not a publication</title></item>
+    </channel></rss>`;
+    const v = await validateSubmission(
+      "https://y.example/feed.xml",
+      stubFetch({ "https://y.example/feed.xml": { body: noChannelTitle, type: "application/rss+xml" } }),
+    );
+    expect(v.title).toBeNull();
+  });
+
+  it("a blyg is unaffected — its name still comes from the manifest", async () => {
+    const v = await validateSubmission(
+      "https://b.example/",
+      stubFetch({
+        "https://b.example/blyg.json": {
+          body: JSON.stringify({ blyg: "0.3", site: "https://b.example/", title: "A Blyg" }),
+          type: "application/json",
+        },
+      }),
+    );
+    expect(v.kind).toBe("blyg");
+    expect(v.title).toBe("A Blyg");
+  });
+});
+
+// Automatic approval (session 29, Venkat: "make approvals automatic unless they
+// need to be flagged for review due to potential security issues").
+//
+// The rule inverted: a submission that resolves cleanly and trips none of
+// review.ts's checks is listed immediately. That makes these tests the gate
+// itself — every case below is one where a listing could deceive or misdirect a
+// reader, and a regression here publishes it instead of queuing it.
+describe("what gets listed automatically", () => {
+  const ok = (over: Partial<import("../src/validate.ts").Validated> = {}) => ({
+    kind: "blyg" as const,
+    origin: "https://clean.example/blyg/",
+    title: "Clean Blyg",
+    homeUrl: "https://clean.example/blyg/",
+    note: null,
+    ...over,
+  });
+
+  async function verdict(v: any, listedTitles?: Set<string>) {
+    const { reviewReason } = await import("../src/review.ts");
+    return reviewReason({ submittedUrl: v.homeUrl ?? "https://clean.example/", validated: v, listedTitles });
+  }
+
+  it("lists a clean blyg with no human in the loop", async () => {
+    expect((await verdict(ok())).reason).toBeNull();
+  });
+
+  it("lists a clean plain feed too", async () => {
+    expect(
+      (await verdict(ok({ kind: "rss", title: "A Feed", origin: "https://feed.example/rss.xml" }))).reason,
+    ).toBeNull();
+  });
+
+  it("holds a manifest that asserts someone else's origin", async () => {
+    // Decision #17: identity is the fetch origin, never the manifest's claim.
+    // A directory is exactly where inheriting someone's identity pays off.
+    const { reason } = await verdict(
+      ok({ note: "manifest asserts site https://original.example/blyg/, served from https://mirror.example/blyg/" }),
+    );
+    expect(reason).toContain("origin mismatch");
+  });
+
+  it("holds a plaintext link", async () => {
+    const { reason } = await verdict(ok({ homeUrl: "http://insecure.example/", origin: "http://insecure.example/" }));
+    expect(reason).toContain("HTTPS");
+  });
+
+  it.each([
+    ["http://localhost:8787/", "localhost"],
+    ["https://thing.local/", "local"],
+    ["https://10.0.0.5/", "10.0.0.5"],
+    ["https://192.168.1.9/", "192.168"],
+    ["https://127.0.0.1/", "127.0.0.1"],
+  ])("holds %s — a public directory does not send readers there", async (home) => {
+    const { reason } = await verdict(ok({ homeUrl: home, origin: home }));
+    expect(reason).not.toBeNull();
+  });
+
+  it("holds a bare IP address", async () => {
+    const { reason } = await verdict(ok({ homeUrl: "https://93.184.216.34/", origin: "https://93.184.216.34/" }));
+    expect(reason).toContain("IP address");
+  });
+
+  it("holds a URL carrying credentials", async () => {
+    const { reason } = await verdict(
+      ok({ homeUrl: "https://user:pw@creds.example/", origin: "https://creds.example/" }),
+    );
+    expect(reason).toContain("credentials");
+  });
+
+  it("holds an internationalised hostname for a human to read", async () => {
+    // Legitimate and common — and also how a homograph attack is spelled. A
+    // machine cannot tell those apart; a person can.
+    const { reason } = await verdict(ok({ homeUrl: "https://xn--80ak6aa92e.example/", origin: "https://xn--80ak6aa92e.example/" }));
+    expect(reason).toContain("internationalised");
+  });
+
+  it("holds a title that can reorder itself on the page", async () => {
+    const { reason } = await verdict(ok({ title: "Innocent‮gnilb suoicilam" }));
+    expect(reason).toContain("direction-override");
+  });
+
+  it("holds a title another listing already uses", async () => {
+    // The simplest impersonation there is, and invisible to every origin check
+    // above because the origin really is different.
+    const { reason } = await verdict(ok({ title: "Protocol Institute Blyg" }), new Set(["protocol institute blyg"]));
+    expect(reason).toContain("already uses the name");
+  });
+
+  it("does not hold a title that merely differs in case or spacing from its own", async () => {
+    expect((await verdict(ok({ title: "Clean Blyg" }), new Set(["something else"]))).reason).toBeNull();
+  });
+});
+
+describe("the decision is made in one place", () => {
+  it("a flagged submission is stored pending, with its reason, and stays off the page", async () => {
+    const { insertSubmission } = await import("../src/store.ts");
+    const id = await insertSubmission(env.DB, {
+      submittedUrl: "https://mirror.example/blyg/",
+      kind: "blyg",
+      origin: "https://mirror.example/blyg/",
+      title: "Held Site",
+      homeUrl: "https://mirror.example/blyg/",
+      resolveNote: null,
+      contact: null,
+      reviewReason: "origin mismatch — manifest asserts site https://original.example/blyg/",
+    });
+    const { getById } = await import("../src/store.ts");
+    const row = await getById(env.DB, id);
+    expect(row?.status).toBe("pending");
+    expect(row?.review_reason).toContain("origin mismatch");
+    expect(await (await get("/")).text()).not.toContain("Held Site");
+    await env.DB.prepare(`DELETE FROM submissions WHERE id = ?`).bind(id).run();
+  });
+
+  it("an unflagged submission is stored approved and appears at once", async () => {
+    const { insertSubmission } = await import("../src/store.ts");
+    const id = await insertSubmission(env.DB, {
+      submittedUrl: "https://auto.example/blyg/",
+      kind: "blyg",
+      origin: "https://auto.example/blyg/",
+      title: "Auto Listed",
+      homeUrl: "https://auto.example/blyg/",
+      resolveNote: null,
+      contact: null,
+      reviewReason: null,
+    });
+    const { getById } = await import("../src/store.ts");
+    expect((await getById(env.DB, id))?.status).toBe("approved");
+    expect(await (await get("/")).text()).toContain("Auto Listed");
+    await env.DB.prepare(`DELETE FROM submissions WHERE id = ?`).bind(id).run();
+  });
+
+  it("only approved names count as taken, so a queued one cannot block a real listing", async () => {
+    const { insertSubmission, listedTitles } = await import("../src/store.ts");
+    const held = await insertSubmission(env.DB, {
+      submittedUrl: "https://held.example/",
+      kind: "blyg",
+      origin: "https://held.example/",
+      title: "Not Yet Public",
+      homeUrl: "https://held.example/",
+      resolveNote: null,
+      contact: null,
+      reviewReason: "held for some reason",
+    });
+    expect(await listedTitles(env.DB)).not.toContain("not yet public");
+    await env.DB.prepare(`DELETE FROM submissions WHERE id = ?`).bind(held).run();
   });
 });

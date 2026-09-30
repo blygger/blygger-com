@@ -18,6 +18,12 @@ export interface SubmissionRow {
   admin_note: string | null;
   /** Optional, operator-supplied, **never published** — see migration 0002. */
   contact: string | null;
+  /**
+   * Why this row was held for review, or `null` if it was listed automatically
+   * (migration 0003). Also `null` on every row that predates auto-approval —
+   * those were queued by the old blanket rule, not by a finding about them.
+   */
+  review_reason: string | null;
 }
 
 /**

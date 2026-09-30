@@ -8,7 +8,8 @@
 // somebody insists is there is a bug report.
 
 import { resolve } from "./vendor/resolve.ts";
-import type { FetchLike } from "./vendor/http.ts";
+import { platformFetch, type FetchLike } from "./vendor/http.ts";
+import { channelTitle } from "./feed-title.ts";
 
 export interface Validated {
   kind: "blyg" | "rss" | "failure";
@@ -33,6 +34,21 @@ function manifestTitle(manifest: Record<string, unknown>): string | null {
 function homeFromFeed(feedUrl: string): string | null {
   try {
     return new URL(feedUrl).origin + "/";
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The feed's own name, or `null` if it cannot be had. Never throws and never
+ * fails a submission: by this point the URL has already resolved as a feed, and
+ * a missing title costs a nicer label, nothing more.
+ */
+async function feedTitle(feedUrl: string, fetchFn: FetchLike = platformFetch): Promise<string | null> {
+  try {
+    const res = await fetchFn(feedUrl);
+    if (!res.ok) return null;
+    return channelTitle(await res.text());
   } catch {
     return null;
   }
@@ -63,7 +79,20 @@ export async function validateSubmission(raw: string, fetchFn?: FetchLike): Prom
     };
   }
   if (r.kind === "rss") {
-    return { kind: "rss", origin: r.feedUrl, title: null, homeUrl: homeFromFeed(r.feedUrl), note: null };
+    // One extra GET, at submission time only, to learn what the publication
+    // calls itself. The resolver already fetched this document to decide it was
+    // a feed but does not return the body, and `src/vendor/` is copied from
+    // blygger-spec and must not be edited here — so the choice is one more
+    // request or a feed row that reads as a bare hostname forever. A directory
+    // whose entries are half named and half hostnames is not much of a
+    // directory.
+    return {
+      kind: "rss",
+      origin: r.feedUrl,
+      title: await feedTitle(r.feedUrl, fetchFn),
+      homeUrl: homeFromFeed(r.feedUrl),
+      note: null,
+    };
   }
   return {
     kind: "failure",

@@ -48,19 +48,42 @@ export interface NewSubmission {
   homeUrl: string | null;
   resolveNote: string | null;
   contact: string | null;
+  /** Why a human must look at this one; `null` lists it immediately. */
+  reviewReason: string | null;
 }
 
+/**
+ * Insert, and decide publication in the same statement.
+ *
+ * `status` is computed from `reviewReason` here rather than passed in, so there
+ * is exactly one place that can put a row into `approved` at submission time and
+ * it is the place that also records why it did. A caller cannot approve a row by
+ * forgetting to set a flag.
+ */
 export async function insertSubmission(db: D1Database, s: NewSubmission): Promise<string> {
   const id = newId();
+  const status = s.reviewReason ? "pending" : "approved";
   await db
     .prepare(
       `INSERT INTO submissions
-         (id, submitted_url, kind, origin, title, home_url, resolve_note, status, submitted_at, contact)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+         (id, submitted_url, kind, origin, title, home_url, resolve_note, status, submitted_at, contact, review_reason)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(id, s.submittedUrl, s.kind, s.origin, s.title, s.homeUrl, s.resolveNote, nowIso(), s.contact)
+    .bind(id, s.submittedUrl, s.kind, s.origin, s.title, s.homeUrl, s.resolveNote, status, nowIso(), s.contact, s.reviewReason)
     .run();
   return id;
+}
+
+/**
+ * The names already on the public list, lowercased — the input to review.ts's
+ * impersonation check. Approved only: a name waiting in the queue has not been
+ * published, so it is not yet something another listing could be confused with.
+ */
+export async function listedTitles(db: D1Database): Promise<Set<string>> {
+  const { results } = await db
+    .prepare(`SELECT title FROM submissions WHERE status = 'approved' AND title IS NOT NULL AND title != ''`)
+    .all<{ title: string }>();
+  return new Set((results ?? []).map((r) => r.title.trim().toLowerCase()));
 }
 
 /**
