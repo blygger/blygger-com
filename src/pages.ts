@@ -36,6 +36,14 @@ a { color: var(--accent); }
 
 form.add { border: 1px solid var(--rule); border-radius: 4px; padding: 1.25rem;
   margin-bottom: 3rem; }
+details.add-wrap { margin: -1.25rem 0 2.5rem; }
+details.add-wrap > summary { display: inline-block; list-style: none; cursor: pointer;
+  font-family: var(--sans); font-size: 0.88rem; padding: 0.55rem 1.1rem;
+  border: 1px solid var(--accent); border-radius: 3px; color: var(--accent); }
+details.add-wrap > summary::-webkit-details-marker { display: none; }
+details.add-wrap > summary:hover { background: var(--accent); color: #fff; }
+details.add-wrap[open] > summary { background: var(--accent); color: #fff; margin-bottom: 1rem; }
+details.add-wrap form.add { margin-bottom: 0; }
 form.add label { display: block; font-family: var(--sans); font-size: 0.78rem;
   letter-spacing: 0.04em; text-transform: uppercase; color: var(--soft);
   margin-bottom: 0.5rem; }
@@ -66,6 +74,18 @@ form.add .field + .field label { margin-bottom: 0.4rem; }
 h2 { font-family: var(--sans); font-size: 0.78rem; letter-spacing: 0.08em;
   text-transform: uppercase; color: var(--soft); border-top: 1px solid var(--rule);
   padding-top: 1.1rem; margin: 0 0 1.25rem; }
+[role=tablist] { display: flex; gap: 1.5rem; border-bottom: 1px solid var(--rule);
+  margin: 0 0 0.5rem; }
+[role=tab] { background: none; border: 0; border-bottom: 2px solid transparent;
+  border-radius: 0; color: var(--soft); padding: 0.5rem 0; margin-bottom: -1px;
+  font-family: var(--sans); font-size: 0.85rem; letter-spacing: 0.04em; }
+[role=tab][aria-selected=true] { color: var(--ink); border-bottom-color: var(--accent); }
+[role=tab]:hover { color: var(--accent); filter: none; }
+[role=tab] .count { color: var(--soft); font-weight: 400; margin-left: 0.3em; }
+.tabhint { font-size: 0.85rem; color: var(--soft); margin: 0.75rem 0 0.25rem; }
+/* Without the script there are no tabs, and both panels stack under their own heading. */
+.panel h2.nojs { margin-top: 2rem; }
+.tabbed .panel h2.nojs { display: none; }
 ul.blygs { list-style: none; padding: 0; margin: 0; }
 ul.blygs li { padding: 0.7rem 0; border-bottom: 1px solid var(--rule); display: flex;
   gap: 0.75rem; align-items: baseline; flex-wrap: wrap; }
@@ -184,28 +204,68 @@ const SUBMIT_SCRIPT = `
 })();
 `;
 
-export function publicPage(rows: PublicRow[]): string {
-  const items = rows
+// Tabs over two server-rendered lists. With no script both panels show,
+// stacked under their own headings, so the directory never depends on JS.
+const TABS_SCRIPT = `
+(function () {
+  var root = document.getElementById('dir');
+  if (!root) return;
+  var tabs = Array.prototype.slice.call(root.querySelectorAll('[role=tab]'));
+  function show(name, focus) {
+    tabs.forEach(function (t) {
+      var on = t.dataset.tab === name;
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+      t.tabIndex = on ? 0 : -1;
+      document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+      if (on && focus) t.focus();
+    });
+  }
+  root.classList.add('tabbed');
+  root.querySelector('[role=tablist]').hidden = false;
+  show(location.hash === '#legacy' ? 'legacy' : 'blygs');
+  tabs.forEach(function (t, i) {
+    t.addEventListener('click', function () {
+      show(t.dataset.tab);
+      history.replaceState(null, '', t.dataset.tab === 'legacy' ? '#legacy' : location.pathname);
+    });
+    t.addEventListener('keydown', function (e) {
+      var d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+      if (!d) return;
+      e.preventDefault();
+      show(tabs[(i + d + tabs.length) % tabs.length].dataset.tab, true);
+    });
+  });
+})();
+`;
+
+function listItems(rows: PublicRow[], mark: string): string {
+  return rows
     .map((r) => {
       const home = r.home_url ?? "";
       const name = r.title?.trim() || hostOf(home);
-      const mark =
-        r.kind === "blyg"
-          ? '<span class="mark blyg" title="resolves as a blyg">blyg</span>'
-          : '<span class="mark" title="a plain RSS or Atom feed">feed</span>';
       return `  <li>${mark}<a class="name" href="${escapeHtml(home)}">${escapeHtml(name)}</a>` +
         `<span class="host">${escapeHtml(hostOf(home))}</span></li>`;
     })
     .join("\n");
+}
 
-  const list = rows.length
-    ? `<ul class="blygs">\n${items}\n</ul>`
-    : `<p class="empty">Nothing listed yet.</p>`;
+export function publicPage(rows: PublicRow[]): string {
+  const blygs = rows.filter((r) => r.kind === "blyg");
+  const legacy = rows.filter((r) => r.kind !== "blyg");
+
+  const blygList = blygs.length
+    ? `<ul class="blygs">\n${listItems(blygs, '<span class="mark blyg" title="resolves as a blyg">blyg</span>')}\n</ul>`
+    : `<p class="empty">No blygs listed yet.</p>`;
+  const legacyList = legacy.length
+    ? `<ul class="blygs">\n${listItems(legacy, '<span class="mark" title="a plain RSS or Atom feed">feed</span>')}\n</ul>`
+    : `<p class="empty">No feeds listed yet.</p>`;
 
   const body = `<h1>A directory of blygs</h1>
 <p class="lede">Sites publishing with the <a href="https://blygger.org">Blygger protocol</a> —
 and a few plain feeds worth reading. Links go to the site itself, not to its feed.</p>
 
+<details class="add-wrap">
+<summary>+ Add a blyg or feed</summary>
 <form class="add" id="add">
   <div class="field">
     <label for="url">Add your blyg</label>
@@ -240,10 +300,24 @@ and a few plain feeds worth reading. Links go to the site itself, not to its fee
     <em>some</em> client published a blyg, because the manifest carries a
     <code>generator</code> string — it cannot see whose it is or where to read the code.</p>
 </form>
+</details>
 
-<h2>Listed</h2>
-${list}`;
-  return layout("blygger.com — a directory of blygs", body, SUBMIT_SCRIPT);
+<section id="dir">
+<div role="tablist" aria-label="Directory" hidden>
+  <button type="button" role="tab" id="tab-blygs" data-tab="blygs" aria-controls="panel-blygs">Blygs<span class="count">${blygs.length}</span></button>
+  <button type="button" role="tab" id="tab-legacy" data-tab="legacy" aria-controls="panel-legacy">Legacy RSS<span class="count">${legacy.length}</span></button>
+</div>
+<div class="panel" role="tabpanel" id="panel-blygs" aria-labelledby="tab-blygs">
+<h2 class="nojs">Blygs</h2>
+${blygList}
+</div>
+<div class="panel" role="tabpanel" id="panel-legacy" aria-labelledby="tab-legacy">
+<h2 class="nojs">Legacy RSS</h2>
+<p class="tabhint">Plain RSS and Atom feeds — readable, but not speaking the protocol.</p>
+${legacyList}
+</div>
+</section>`;
+  return layout("blygger.com — a directory of blygs", body, SUBMIT_SCRIPT + TABS_SCRIPT);
 }
 
 export function loginPage(error = false): string {

@@ -84,7 +84,7 @@ describe("the public list shows approved rows and nothing else", () => {
     ).run();
     const html = await (await get("/")).text();
     expect(html).not.toContain("Pending Site");
-    expect(html).toContain("Nothing listed yet.");
+    expect(html).toContain("No blygs listed yet.");
   });
 
   it("appears once approved, linking the home page", async () => {
@@ -98,6 +98,31 @@ describe("the public list shows approved rows and nothing else", () => {
     await env.DB.prepare(`UPDATE submissions SET status = 'rejected' WHERE id = 'p1'`).run();
     expect(await (await get("/")).text()).not.toContain("Pending Site");
     await env.DB.prepare(`DELETE FROM submissions WHERE id = 'p1'`).run();
+  });
+});
+
+describe("the directory splits blygs from legacy RSS", () => {
+  it("each kind renders in its own panel", async () => {
+    const { publicPage } = await import("../src/pages.ts");
+    const html = publicPage([
+      { kind: "blyg", title: "A Blyg", home_url: "https://b.example/" },
+      { kind: "rss", title: "A Feed", home_url: "https://f.example/" },
+    ]);
+    const blygs = html.slice(html.indexOf('id="panel-blygs"'), html.indexOf('id="panel-legacy"'));
+    const legacy = html.slice(html.indexOf('id="panel-legacy"'));
+    expect(blygs).toContain("A Blyg");
+    expect(blygs).not.toContain("A Feed");
+    expect(legacy).toContain("A Feed");
+    expect(legacy).not.toContain("A Blyg");
+    expect(html).toContain('aria-controls="panel-blygs"');
+    expect(html).toContain('aria-controls="panel-legacy"');
+  });
+
+  it("the submit form sits behind a disclosure, above the directory", async () => {
+    const html = await (await get("/")).text();
+    expect(html.indexOf('<details class="add-wrap">')).toBeGreaterThan(-1);
+    expect(html.indexOf('<form class="add" id="add">')).toBeGreaterThan(html.indexOf('<details class="add-wrap">'));
+    expect(html.indexOf('<section id="dir">')).toBeGreaterThan(html.indexOf("</details>"));
   });
 });
 
