@@ -17,7 +17,8 @@ import { newId, nowIso } from "./util.ts";
 export async function listApproved(db: D1Database): Promise<PublicRow[]> {
   const { results } = await db
     .prepare(
-      `SELECT kind, title, home_url FROM submissions
+      `SELECT kind, title, home_url, origin,
+              COALESCE(reviewed_at, submitted_at) AS listed_at FROM submissions
        WHERE status = 'approved' AND home_url IS NOT NULL
        ORDER BY submitted_at DESC`,
     )

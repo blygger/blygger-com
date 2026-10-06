@@ -2,7 +2,7 @@
 // are resolved with the real resolver, and the admin surface is actually gated.
 
 import { describe, expect, it } from "vitest";
-import { env } from "cloudflare:test";
+import { env, SELF } from "cloudflare:test";
 import { get, login, postJson } from "./helpers.ts";
 import { validateSubmission } from "../src/validate.ts";
 import type { FetchResult } from "../src/vendor/http.ts";
@@ -105,8 +105,8 @@ describe("the directory splits blygs from legacy RSS", () => {
   it("each kind renders in its own panel", async () => {
     const { publicPage } = await import("../src/pages.ts");
     const html = publicPage([
-      { kind: "blyg", title: "A Blyg", home_url: "https://b.example/" },
-      { kind: "rss", title: "A Feed", home_url: "https://f.example/" },
+      { kind: "blyg", title: "A Blyg", home_url: "https://b.example/", origin: "https://b.example/", listed_at: "2026-10-01T00:00:00Z" },
+      { kind: "rss", title: "A Feed", home_url: "https://f.example/", origin: "https://f.example/rss", listed_at: "2026-10-01T00:00:00Z" },
     ]);
     const blygs = html.slice(html.indexOf('id="panel-blygs"'), html.indexOf('id="panel-legacy"'));
     const legacy = html.slice(html.indexOf('id="panel-legacy"'));
@@ -123,6 +123,42 @@ describe("the directory splits blygs from legacy RSS", () => {
     expect(html.indexOf('<details class="add-wrap">')).toBeGreaterThan(-1);
     expect(html.indexOf('<form class="add" id="add">')).toBeGreaterThan(html.indexOf('<details class="add-wrap">'));
     expect(html.indexOf('<section id="dir">')).toBeGreaterThan(html.indexOf("</details>"));
+  });
+});
+
+describe("blygs.opml", () => {
+  it("lists approved blygs only, as §11-shaped outlines, and never a contact", async () => {
+    const { insertSubmission } = await import("../src/store.ts");
+    const mk = (n: string, kind: "blyg" | "rss", origin: string, contact: string | null = null) =>
+      insertSubmission(env.DB, {
+        submittedUrl: origin, kind, origin, title: n, homeUrl: kind === "rss" ? "https://legacy.example/" : origin,
+        resolveNote: null, contact, reviewReason: null, warnings: [],
+      });
+    const a = await mk("Opml Blyg & Co", "blyg", "https://ob.example/blyg/", "secret@private.example");
+    const b = await mk("Opml Feed", "rss", "https://legacy.example/rss");
+    const held = await mk("Opml Held", "blyg", "https://held.example/");
+    await env.DB.prepare(`UPDATE submissions SET status = 'pending' WHERE id = ?`).bind(held).run();
+
+    const res = await get("/blygs.opml");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/x-opml");
+    const xml = await res.text();
+    expect(xml).toContain('<opml version="2.0">');
+    expect(xml).toContain('text="Opml Blyg &amp; Co"');
+    expect(xml).toContain('xmlUrl="https://ob.example/blyg/feed.xml" htmlUrl="https://ob.example/blyg/"');
+    expect(xml).not.toContain("Opml Feed");
+    expect(xml).not.toContain("Opml Held");
+    expect(xml).not.toContain("private.example");
+    expect(xml).not.toContain("blyg:");
+
+    const again = await SELF.fetch("https://blygger.com/blygs.opml", { headers: { "if-none-match": res.headers.get("etag")! } });
+    expect(again.status).toBe(304);
+
+    for (const id of [a, b, held]) await env.DB.prepare(`DELETE FROM submissions WHERE id = ?`).bind(id).run();
+  });
+
+  it("is advertised from the page head", async () => {
+    expect(await (await get("/")).text()).toContain('rel="outline" type="text/x-opml"');
   });
 });
 

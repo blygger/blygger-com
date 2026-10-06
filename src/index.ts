@@ -11,8 +11,9 @@
 
 import { Hono } from "hono";
 import type { Context } from "hono";
+import { etag } from "hono/etag";
 import { checkPassword, clearSessionCookie, issueSessionCookie, verifySession } from "./auth.ts";
-import { adminPage, loginPage, publicPage } from "./pages.ts";
+import { adminPage, blygsOpml, loginPage, publicPage } from "./pages.ts";
 import { applyRecheck, getByOrigin, insertSubmission, listApproved, listForReview, listPending, setContactIfEmpty, setStatus, getById } from "./store.ts";
 import { reviewReason } from "./review.ts";
 import type { Env } from "./types.ts";
@@ -27,6 +28,18 @@ const PUBLIC_CACHE = "public, max-age=60";
 app.get("/", async (c) => {
   const rows = await listApproved(c.env.DB);
   return c.html(publicPage(rows), 200, { "cache-control": PUBLIC_CACHE });
+});
+
+// The blygs as OPML. Same query and cache lifetime as the page, so it can never
+// list something the page does not. The ETag makes polling cheap: an agent
+// re-fetching an unchanged directory gets a 304.
+app.get("/blygs.opml", etag(), async (c) => {
+  const rows = await listApproved(c.env.DB);
+  return c.body(blygsOpml(rows), 200, {
+    "content-type": "text/x-opml; charset=utf-8",
+    "cache-control": PUBLIC_CACHE,
+    "access-control-allow-origin": "*",
+  });
 });
 
 /**

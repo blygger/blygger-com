@@ -118,6 +118,7 @@ function layout(title: string, body: string, script = ""): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="A directory of blygs — sites publishing with the Blygger protocol.">
+<link rel="outline" type="text/x-opml" title="Blygs listed on blygger.com" href="/blygs.opml">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22><circle cx=%228%22 cy=%228%22 r=%227%22 fill=%22%23d95a1f%22/></svg>">
 <style>${STYLE}</style>
 </head>
@@ -309,6 +310,8 @@ and a few plain feeds worth reading. Links go to the site itself, not to its fee
 </div>
 <div class="panel" role="tabpanel" id="panel-blygs" aria-labelledby="tab-blygs">
 <h2 class="nojs">Blygs</h2>
+<p class="tabhint">Every blyg below, as one file a feed reader or agent can import:
+  <a href="/blygs.opml">blygs.opml</a>.</p>
 ${blygList}
 </div>
 <div class="panel" role="tabpanel" id="panel-legacy" aria-labelledby="tab-legacy">
@@ -413,4 +416,53 @@ ${rows
 </table>`
     : `<h1>Review</h1><p class="empty">No submissions yet.</p>`;
   return layout("Review — blygger.com", body, ADMIN_SCRIPT);
+}
+
+/**
+ * The feed a subscriber should follow. Under 0.3 the feed path is
+ * protocol-fixed (§4), so a blyg's is `{origin}feed.xml`; a legacy row's
+ * origin already *is* its feed URL. At 0.4 the manifest's `feed` key becomes
+ * authoritative (§16) and this has to come from a stored resolution instead.
+ */
+export function feedUrlOf(r: PublicRow): string | null {
+  if (!r.origin) return null;
+  if (r.kind !== "blyg") return r.origin;
+  try {
+    return new URL("feed.xml", r.origin).toString();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Every listed blyg as OPML 2.0, in exactly the shape of a §11 blogroll: one
+ * flat outline per feed, no blyg-specific attributes. A consumer resolving
+ * each xmlUrl through §12 gets the blyg upgrade from the feed itself.
+ * Rendered per request from the same approved-only query as the page, so it
+ * is current the moment a listing is.
+ */
+export function blygsOpml(rows: PublicRow[]): string {
+  const blygs = rows.filter((r) => r.kind === "blyg");
+  const latest = blygs.reduce((m, r) => (r.listed_at > m ? r.listed_at : m), "");
+  const outlines = blygs
+    .map((r) => {
+      const xml = feedUrlOf(r);
+      if (!xml) return "";
+      const home = r.home_url ?? r.origin ?? "";
+      const name = escapeHtml(r.title?.trim() || hostOf(home));
+      return `    <outline type="rss" text="${name}" title="${name}" xmlUrl="${escapeHtml(xml)}" htmlUrl="${escapeHtml(home)}" />`;
+    })
+    .filter(Boolean)
+    .join("\n");
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head>
+    <title>Blygs listed on blygger.com</title>
+${latest ? `    <dateModified>${new Date(latest).toUTCString()}</dateModified>\n` : ""}    <docs>https://opml.org/spec2.opml</docs>
+  </head>
+  <body>
+${outlines}
+  </body>
+</opml>
+`;
 }
