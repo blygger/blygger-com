@@ -17,12 +17,30 @@ export interface Validated {
   title: string | null;
   homeUrl: string | null;
   note: string | null;
+  /**
+   * A blyg's §11 blogroll, absolute, when its manifest advertises one. Only the
+   * scheduled health check reads it (to find blygs worth inviting); a
+   * submission ignores it.
+   */
+  blogrollUrl?: string | null;
 }
 
 /** Pull a human-facing title out of a manifest without trusting its shape. */
 function manifestTitle(manifest: Record<string, unknown>): string | null {
   const t = manifest["title"];
   return typeof t === "string" && t.trim() ? t.trim().slice(0, 200) : null;
+}
+
+/** The manifest's OPTIONAL `blogroll` key (§6.1), made absolute against the origin. */
+function manifestBlogroll(manifest: Record<string, unknown>, origin: string): string | null {
+  const b = manifest["blogroll"];
+  if (typeof b !== "string" || !b.trim()) return null;
+  try {
+    const u = new URL(b.trim(), origin);
+    return u.protocol === "https:" || u.protocol === "http:" ? u.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -71,6 +89,7 @@ export async function validateSubmission(raw: string, fetchFn?: FetchLike): Prom
       origin: r.origin,
       title: manifestTitle(r.manifest),
       homeUrl: r.origin,
+      blogrollUrl: manifestBlogroll(r.manifest, r.origin),
       // Surfaced, not adopted — decision #17's rule that a mirror must never
       // inherit another origin's identity. Worth recording when it happens.
       note: r.siteMismatch

@@ -13,7 +13,8 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { etag } from "hono/etag";
 import { checkPassword, clearSessionCookie, issueSessionCookie, verifySession } from "./auth.ts";
-import { adminPage, blygsOpml, loginPage, publicPage } from "./pages.ts";
+import { adminPage, blygsOpml, listingsAtom, loginPage, publicPage } from "./pages.ts";
+import { listUnlistedBlygs, runHealthPass, timedFetch } from "./health.ts";
 import { applyRecheck, getByOrigin, insertSubmission, listApproved, listForReview, listPending, setContactIfEmpty, setStatus, getById } from "./store.ts";
 import { reviewReason } from "./review.ts";
 import type { Env } from "./types.ts";
@@ -37,6 +38,16 @@ app.get("/blygs.opml", etag(), async (c) => {
   const rows = await listApproved(c.env.DB);
   return c.body(blygsOpml(rows), 200, {
     "content-type": "text/x-opml; charset=utf-8",
+    "cache-control": PUBLIC_CACHE,
+    "access-control-allow-origin": "*",
+  });
+});
+
+// New listings as Atom: subscribe here instead of diffing the OPML file.
+app.get("/listings.xml", etag(), async (c) => {
+  const rows = await listApproved(c.env.DB);
+  return c.body(listingsAtom(rows), 200, {
+    "content-type": "application/atom+xml; charset=utf-8",
     "cache-control": PUBLIC_CACHE,
     "access-control-allow-origin": "*",
   });
@@ -130,7 +141,7 @@ async function requireOwner(c: Context<{ Bindings: Env }>): Promise<boolean> {
 
 app.get("/admin", async (c) => {
   if (!(await requireOwner(c))) return c.html(loginPage());
-  return c.html(adminPage(await listForReview(c.env.DB)));
+  return c.html(adminPage(await listForReview(c.env.DB), await listUnlistedBlygs(c.env.DB)));
 });
 
 app.post("/admin/login", async (c) => {
@@ -205,4 +216,17 @@ app.post("/admin/recheck", async (c) => {
   return c.json({ ok: true, checked: pending.length, listed: listed.length, warned, held });
 });
 
-export default app;
+/**
+ * Hourly (wrangler.jsonc `triggers.crons`): re-check a few listings and read
+ * their blogrolls. See health.ts for the budget and what a failure does.
+ */
+async function scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+  ctx.waitUntil(
+    runHealthPass(env.DB, timedFetch).then(
+      (r) => console.log("health pass", JSON.stringify(r)),
+      (e) => console.error("health pass failed", e),
+    ),
+  );
+}
+
+export default { fetch: app.fetch, scheduled } satisfies ExportedHandler<Env>;

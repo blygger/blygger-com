@@ -5,6 +5,7 @@
 
 import type { PublicRow, SubmissionRow } from "./types.ts";
 import { escapeHtml } from "./util.ts";
+import { isDormant, type UnlistedBlyg } from "./health.ts";
 
 const STYLE = `
 :root {
@@ -119,6 +120,7 @@ function layout(title: string, body: string, script = ""): string {
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="A directory of blygs — sites publishing with the Blygger protocol.">
 <link rel="outline" type="text/x-opml" title="Blygs listed on blygger.com" href="/blygs.opml">
+<link rel="alternate" type="application/atom+xml" title="New on blygger.com" href="/listings.xml">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22><circle cx=%228%22 cy=%228%22 r=%227%22 fill=%22%23d95a1f%22/></svg>">
 <style>${STYLE}</style>
 </head>
@@ -311,7 +313,8 @@ and a few plain feeds worth reading. Links go to the site itself, not to its fee
 <div class="panel" role="tabpanel" id="panel-blygs" aria-labelledby="tab-blygs">
 <h2 class="nojs">Blygs</h2>
 <p class="tabhint">Every blyg below, as one file a feed reader or agent can import:
-  <a href="/blygs.opml">blygs.opml</a>.</p>
+  <a href="/blygs.opml">blygs.opml</a>. To hear about new ones, subscribe to
+  <a href="/listings.xml">listings.xml</a>.</p>
 ${blygList}
 </div>
 <div class="panel" role="tabpanel" id="panel-legacy" aria-labelledby="tab-legacy">
@@ -373,7 +376,39 @@ const ADMIN_SCRIPT = `
 })();
 `;
 
-export function adminPage(rows: SubmissionRow[]): string {
+function healthNote(r: SubmissionRow, now: Date): string {
+  if (r.status !== "approved") return "";
+  if (!r.last_checked_at) return `<div class="note">health: not checked yet</div>`;
+  const when = r.last_checked_at.slice(0, 16).replace("T", " ");
+  const detail = r.health_note ? ` — ${escapeHtml(r.health_note)}` : "";
+  if (r.failing_since) {
+    const state = isDormant(r.failing_since, now) ? "dormant (out of OPML and feed)" : "failing";
+    return `<div class="note warn">health: ${state} since ${escapeHtml(r.failing_since.slice(0, 16).replace("T", " "))}${detail}</div>`;
+  }
+  return `<div class="note">health: ok at ${escapeHtml(when)}${detail}</div>`;
+}
+
+function unlistedSection(unlisted: UnlistedBlyg[]): string {
+  if (!unlisted.length) return "";
+  return `<h2 style="margin-top:3rem">Seen in blogrolls, not listed</h2>
+<p class="note">Blygs that listed blygs follow. Not shown publicly and never listed from here —
+  the directory lists blygs that list themselves. People to invite.</p>
+<table class="review">
+<thead><tr><th>Blyg</th><th>Seen on</th><th>First seen</th></tr></thead>
+<tbody>
+${unlisted
+  .map(
+    (u) => `<tr><td><a href="${escapeHtml(u.origin)}">${escapeHtml(u.title?.trim() || hostOf(u.origin))}</a>
+  <div class="note">${escapeHtml(u.origin)}</div></td>
+  <td class="note">${escapeHtml(hostOf(u.seen_on))}</td>
+  <td class="note">${escapeHtml(u.first_seen_at.slice(0, 10))}</td></tr>`,
+  )
+  .join("\n")}
+</tbody>
+</table>`;
+}
+
+export function adminPage(rows: SubmissionRow[], unlisted: UnlistedBlyg[] = [], now = new Date()): string {
   const body = rows.length
     ? `<h1>Review</h1>
 <p class="lede">${rows.filter((r) => r.status === "pending").length} pending of ${rows.length}.
@@ -401,7 +436,7 @@ ${rows
     }
     return `<tr>
   <td><a href="${escapeHtml(home)}">${escapeHtml(r.title?.trim() || hostOf(home))}</a>
-      <div class="note">submitted: ${escapeHtml(r.submitted_url)}</div>${note}${held}${warned}</td>
+      <div class="note">submitted: ${escapeHtml(r.submitted_url)}</div>${note}${held}${warned}${healthNote(r, now)}</td>
   <td>${escapeHtml(r.kind ?? "—")}</td>
   <td class="note">${r.contact ? escapeHtml(r.contact) : "—"}</td>
   <td class="status-${escapeHtml(r.status)}">${escapeHtml(r.status)}</td>
@@ -415,7 +450,7 @@ ${rows
 </tbody>
 </table>`
     : `<h1>Review</h1><p class="empty">No submissions yet.</p>`;
-  return layout("Review — blygger.com", body, ADMIN_SCRIPT);
+  return layout("Review — blygger.com", body + unlistedSection(unlisted), ADMIN_SCRIPT);
 }
 
 /**
@@ -435,14 +470,23 @@ export function feedUrlOf(r: PublicRow): string | null {
 }
 
 /**
+ * The blygs the machine surfaces hand out: listed, and not dormant. A dormant
+ * listing has failed every health check for 72 hours (health.ts); it stays on
+ * the page, but an agent following the export would only be polling a corpse.
+ */
+function machineBlygs(rows: PublicRow[], now: Date): PublicRow[] {
+  return rows.filter((r) => r.kind === "blyg" && !isDormant(r.failing_since, now));
+}
+
+/**
  * Every listed blyg as OPML 2.0, in exactly the shape of a §11 blogroll: one
  * flat outline per feed, no blyg-specific attributes. A consumer resolving
  * each xmlUrl through §12 gets the blyg upgrade from the feed itself.
  * Rendered per request from the same approved-only query as the page, so it
  * is current the moment a listing is.
  */
-export function blygsOpml(rows: PublicRow[]): string {
-  const blygs = rows.filter((r) => r.kind === "blyg");
+export function blygsOpml(rows: PublicRow[], now = new Date()): string {
+  const blygs = machineBlygs(rows, now);
   const latest = blygs.reduce((m, r) => (r.listed_at > m ? r.listed_at : m), "");
   const outlines = blygs
     .map((r) => {
@@ -464,5 +508,55 @@ ${latest ? `    <dateModified>${new Date(latest).toUTCString()}</dateModified>\n
 ${outlines}
   </body>
 </opml>
+`;
+}
+
+/** Atom wants RFC 3339; stored timestamps are ISO already, but be strict about it. */
+function rfc3339(iso: string): string {
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? new Date(0).toISOString() : new Date(t).toISOString();
+}
+
+/**
+ * New listings as an Atom feed — the push half of /blygs.opml. Anything that
+ * follows feeds (a blyg among them) can subscribe and learn about new blygs
+ * without diffing the OPML file. Blygs only, newest first, capped; an entry's
+ * id is the blyg's origin, which is its identity in the protocol (§12.2), so
+ * a re-listing is the same entry rather than a new one.
+ */
+export function listingsAtom(rows: PublicRow[], now = new Date()): string {
+  const blygs = machineBlygs(rows, now)
+    .slice()
+    .sort((a, b) => (a.listed_at < b.listed_at ? 1 : -1))
+    .slice(0, 50);
+  const updated = blygs.length ? rfc3339(blygs[0].listed_at) : rfc3339("2026-09-16T00:00:00Z");
+  const entries = blygs
+    .map((r) => {
+      const home = r.home_url ?? r.origin ?? "";
+      const feed = feedUrlOf(r);
+      const name = escapeHtml(r.title?.trim() || hostOf(home));
+      const when = rfc3339(r.listed_at);
+      return `  <entry>
+    <id>${escapeHtml(r.origin ?? home)}</id>
+    <title>${name}</title>
+    <link rel="alternate" type="text/html" href="${escapeHtml(home)}"/>
+${feed ? `    <link rel="related" type="application/rss+xml" href="${escapeHtml(feed)}"/>\n` : ""}    <published>${when}</published>
+    <updated>${when}</updated>
+    <summary>${name} (${escapeHtml(hostOf(home))}) listed itself on blygger.com.${feed ? ` Feed: ${escapeHtml(feed)}` : ""}</summary>
+  </entry>`;
+    })
+    .join("\n");
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <id>https://blygger.com/listings.xml</id>
+  <title>New on blygger.com</title>
+  <subtitle>Blygs as they list themselves in the directory.</subtitle>
+  <link rel="self" type="application/atom+xml" href="https://blygger.com/listings.xml"/>
+  <link rel="alternate" type="text/html" href="https://blygger.com/"/>
+  <link rel="related" type="text/x-opml" href="https://blygger.com/blygs.opml"/>
+  <author><name>blygger.com</name></author>
+  <updated>${updated}</updated>
+${entries}
+</feed>
 `;
 }

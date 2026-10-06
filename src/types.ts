@@ -26,6 +26,12 @@ export interface SubmissionRow {
   review_reason: string | null;
   /** JSON array of operator-facing findings (migration 0004); null on older rows. */
   warnings: string | null;
+  /** Health (migration 0005) — see health.ts. All null until the first scheduled check. */
+  last_checked_at: string | null;
+  last_ok_at: string | null;
+  failing_since: string | null;
+  /** Admin-only. */
+  health_note: string | null;
 }
 
 /**
@@ -44,4 +50,6 @@ export interface PublicRow {
   origin: string | null;
   /** When it went public: review time if a human approved it, else submission. */
   listed_at: string;
+  /** Start of the current run of failed health checks (migration 0005), or null. */
+  failing_since: string | null;
 }

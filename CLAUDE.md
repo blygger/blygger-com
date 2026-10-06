@@ -18,7 +18,8 @@ reference client, so there is nothing new to learn moving between them.
 
 | Path | Role |
 |---|---|
-| `src/index.ts` | Routes. `GET /`, `POST /api/submit`, `/admin*`. |
+| `src/index.ts` | Routes. `GET /`, `GET /blygs.opml`, `GET /listings.xml`, `POST /api/submit`, `/admin*`; the hourly `scheduled` handler. |
+| `src/health.ts` | The hourly pass: re-resolves 4 listings per run, marks a listing **dormant** after 72 h of unbroken failures (out of the OPML and Atom feed, still on the page), and records blogroll sightings (admin-only "seen in blogrolls, not listed"). Budget notes at the top. |
 | `src/validate.ts` | Runs the v0.2 resolver against a submission. |
 | `src/store.ts` | Every D1 query. `listApproved` bakes in `status='approved'` so no code path can leak a pending row, and names its columns so no code path can leak a private one. |
 | `src/pages.ts` | Public page, login page, admin queue. Server-rendered, no framework. |
@@ -93,10 +94,10 @@ npx wrangler d1 migrations apply blygger-com --remote   # when migrations change
      beside an entry is honest and is pressure; it is also us editorialising
      about someone else's site on our page. Probably yes for facts a reader
      cares about (plaintext, unreachable) and no for the rest.
-  2. **Re-checking on a schedule.** Warnings are frozen at submission, so an
-     operator who fixes their site is still marked. A cron that re-resolves
-     each listing and rewrites its warnings makes them true, and makes "fixed"
-     observable. Cheap: the resolver is six fetches and the list is ~20 rows.
+  2. ~~**Re-checking on a schedule.**~~ Built session 38 (`src/health.ts`,
+     migration 0005): hourly cron, warnings rewritten on every successful
+     check, dormant listings dropped from the machine surfaces only. Item 1
+     is still open, so nothing about health is shown on the public page.
   3. **Telling them.** We collect an optional contact for security releases
      (migration 0002) and have never used it. A warning is not a security
      release, so reusing that channel needs a decision, not an assumption.

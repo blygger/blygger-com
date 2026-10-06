@@ -105,8 +105,8 @@ describe("the directory splits blygs from legacy RSS", () => {
   it("each kind renders in its own panel", async () => {
     const { publicPage } = await import("../src/pages.ts");
     const html = publicPage([
-      { kind: "blyg", title: "A Blyg", home_url: "https://b.example/", origin: "https://b.example/", listed_at: "2026-10-01T00:00:00Z" },
-      { kind: "rss", title: "A Feed", home_url: "https://f.example/", origin: "https://f.example/rss", listed_at: "2026-10-01T00:00:00Z" },
+      { kind: "blyg", title: "A Blyg", home_url: "https://b.example/", origin: "https://b.example/", listed_at: "2026-10-01T00:00:00Z", failing_since: null },
+      { kind: "rss", title: "A Feed", home_url: "https://f.example/", origin: "https://f.example/rss", listed_at: "2026-10-01T00:00:00Z", failing_since: null },
     ]);
     const blygs = html.slice(html.indexOf('id="panel-blygs"'), html.indexOf('id="panel-legacy"'));
     const legacy = html.slice(html.indexOf('id="panel-legacy"'));
@@ -297,6 +297,10 @@ describe("every inline script parses", () => {
           title: "A",
           home_url: "https://a.example/",
           resolve_note: null,
+          last_checked_at: null,
+          last_ok_at: null,
+          failing_since: null,
+          health_note: null,
           review_reason: null,
           warnings: null,
           contact: "someone@a.example",
@@ -642,5 +646,130 @@ describe("rechecking the existing queue", () => {
   it("refuses without a session", async () => {
     const res = await postJson("/admin/recheck", {});
     expect(res.status).toBe(401);
+  });
+});
+
+// ── Session 38: the listings feed, the health pass, and blogroll sightings ──
+
+const MANIFEST = (site: string, extra: Record<string, unknown> = {}) =>
+  JSON.stringify({ blyg: "0.3", level: 1, site, title: "Healthy Blyg", feed: "feed.xml", items: "items/index.json", ...extra });
+
+describe("listings.xml", () => {
+  it("is Atom, blygs only, keyed by origin, and advertised from the page", async () => {
+    const { insertSubmission } = await import("../src/store.ts");
+    const a = await insertSubmission(env.DB, {
+      submittedUrl: "https://atom.example/", kind: "blyg", origin: "https://atom.example/", title: "Atom Blyg",
+      homeUrl: "https://atom.example/", resolveNote: null, contact: null, reviewReason: null, warnings: [],
+    });
+    const b = await insertSubmission(env.DB, {
+      submittedUrl: "https://atomfeed.example/rss", kind: "rss", origin: "https://atomfeed.example/rss", title: "Atom Legacy",
+      homeUrl: "https://atomfeed.example/", resolveNote: null, contact: null, reviewReason: null, warnings: [],
+    });
+    const res = await get("/listings.xml");
+    expect(res.headers.get("content-type")).toContain("application/atom+xml");
+    const xml = await res.text();
+    expect(xml).toContain('<feed xmlns="http://www.w3.org/2005/Atom">');
+    expect(xml).toContain("<id>https://atom.example/</id>");
+    expect(xml).toContain('rel="related" type="application/rss+xml" href="https://atom.example/feed.xml"');
+    expect(xml).not.toContain("Atom Legacy");
+    expect(await (await get("/")).text()).toContain('type="application/atom+xml"');
+    for (const id of [a, b]) await env.DB.prepare(`DELETE FROM submissions WHERE id = ?`).bind(id).run();
+  });
+});
+
+describe("dormancy", () => {
+  it("only a 72-hour run of failures is dormant", async () => {
+    const { isDormant } = await import("../src/health.ts");
+    const now = new Date("2026-10-06T12:00:00Z");
+    expect(isDormant(null, now)).toBe(false);
+    expect(isDormant("2026-10-04T12:00:01Z", now)).toBe(false);
+    expect(isDormant("2026-10-03T12:00:00Z", now)).toBe(true);
+  });
+
+  it("a dormant blyg leaves the OPML and the feed but stays on the page", async () => {
+    const { blygsOpml, listingsAtom, publicPage } = await import("../src/pages.ts");
+    const rows = [
+      { kind: "blyg" as const, title: "Alive", home_url: "https://alive.example/", origin: "https://alive.example/",
+        listed_at: "2026-10-01T00:00:00Z", failing_since: "2026-10-06T00:00:00Z" },
+      { kind: "blyg" as const, title: "Gone", home_url: "https://gone.example/", origin: "https://gone.example/",
+        listed_at: "2026-10-01T00:00:00Z", failing_since: "2026-09-01T00:00:00Z" },
+    ];
+    const now = new Date("2026-10-06T12:00:00Z");
+    expect(blygsOpml(rows, now)).toContain("Alive");
+    expect(blygsOpml(rows, now)).not.toContain("Gone");
+    expect(listingsAtom(rows, now)).not.toContain("Gone");
+    expect(publicPage(rows)).toContain("Gone");
+  });
+});
+
+describe("the health pass", () => {
+  it("records success, failure, recovery, and blogroll sightings; never delists", async () => {
+    const { runHealthPass, listUnlistedBlygs } = await import("../src/health.ts");
+    const { insertSubmission, getById } = await import("../src/store.ts");
+    await env.DB.prepare(`DELETE FROM submissions`).run();
+    const id = await insertSubmission(env.DB, {
+      submittedUrl: "https://h.example/", kind: "blyg", origin: "https://h.example/", title: "Healthy Blyg",
+      homeUrl: "https://h.example/", resolveNote: null, contact: null, reviewReason: null, warnings: ["stale"],
+    });
+
+    const up = stubFetch({
+      "https://h.example/": { body: '<link rel="blyg" href="/blyg.json">' },
+      "https://h.example/blyg.json": { body: MANIFEST("https://h.example/", { blogroll: "blogroll.opml" }), type: "application/json" },
+      "https://h.example/blogroll.opml": {
+        body: `<?xml version="1.0"?><opml version="2.0"><head/><body>
+          <outline text="Folder"><outline type="rss" text="Friend" xmlUrl="https://friend.example/feed.xml" htmlUrl="https://friend.example/"/></outline>
+          <outline type="rss" text="Self" xmlUrl="https://h.example/feed.xml"/>
+        </body></opml>`,
+      },
+      "https://friend.example/feed.xml": {
+        body: `<?xml version="1.0"?><rss version="2.0" xmlns:blyg="https://blygger.org/ns/0.1"><channel><title>Friend</title><blyg:manifest>https://friend.example/blyg.json</blyg:manifest></channel></rss>`,
+        type: "application/rss+xml",
+      },
+      "https://friend.example/blyg.json": { body: MANIFEST("https://friend.example/"), type: "application/json" },
+      "https://h.example/feed.xml": {
+        body: `<?xml version="1.0"?><rss version="2.0" xmlns:blyg="https://blygger.org/ns/0.1"><channel><title>H</title><blyg:manifest>https://h.example/blyg.json</blyg:manifest></channel></rss>`,
+        type: "application/rss+xml",
+      },
+    });
+
+    const r1 = await runHealthPass(env.DB, up as any, new Date("2026-10-01T00:00:00Z"));
+    expect(r1.checked).toEqual([{ id, ok: true, note: null }]);
+    expect(r1.sightingsRecorded).toBe(2);
+    let row = await getById(env.DB, id);
+    expect(row?.last_ok_at).toBe("2026-10-01T00:00:00.000Z");
+    expect(row?.failing_since).toBeNull();
+    expect(row?.warnings).toBe("[]"); // a fixed site stops being marked
+
+    // The friend resolves as an unlisted blyg; the listing's own feed does not count.
+    const unlisted = await listUnlistedBlygs(env.DB);
+    expect(unlisted.map((u) => u.origin)).toEqual(["https://friend.example/"]);
+    expect(await (await get("/")).text()).not.toContain("friend.example");
+
+    const down = stubFetch({});
+    await runHealthPass(env.DB, down as any, new Date("2026-10-02T00:00:00Z"));
+    await runHealthPass(env.DB, down as any, new Date("2026-10-03T00:00:00Z"));
+    row = await getById(env.DB, id);
+    expect(row?.failing_since).toBe("2026-10-02T00:00:00.000Z"); // the first failure, kept
+    expect(row?.status).toBe("approved");
+    expect(row?.health_note).toContain("resolution failed");
+
+    await runHealthPass(env.DB, up as any, new Date("2026-10-06T00:00:00Z"));
+    row = await getById(env.DB, id);
+    expect(row?.failing_since).toBeNull();
+    expect(row?.health_note).toBeNull();
+
+    await env.DB.prepare(`DELETE FROM submissions`).run();
+    await env.DB.prepare(`DELETE FROM sightings`).run();
+  });
+
+  it("parseBlogroll skips non-http entries and walks folders", async () => {
+    const { parseBlogroll } = await import("../src/health.ts");
+    const got = parseBlogroll(`<opml version="2.0"><body>
+      <outline text="A" xmlUrl="https://a.example/feed"/>
+      <outline text="Bad" xmlUrl="javascript:alert(1)"/>
+      <outline text="F"><outline text="B" xmlUrl="http://b.example/rss"/></outline>
+    </body></opml>`);
+    expect(got.map((g) => g.feedUrl)).toEqual(["https://a.example/feed", "http://b.example/rss"]);
+    expect(parseBlogroll("not xml at all <<<")).toEqual([]);
   });
 });

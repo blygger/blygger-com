@@ -20,6 +20,9 @@
   // Once DNS is onboarded, a Custom Domain (not a Route) — it auto-provisions
   // the DNS record, and this worker owns the whole origin so there is no path
   // space to share. Same reasoning as self-host-plan.md §2.2.
+  // Hourly health pass: re-resolve a few listings, read their blogrolls
+  // (src/health.ts). Small batches because of the per-invocation subrequest cap.
+  "triggers": { "crons": ["17 * * * *"] },
   "routes": [
     { "pattern": "blygger.com", "custom_domain": true }
   ]
