@@ -26,7 +26,7 @@
 // checked first. At an hourly cron that cycles ~33 listings about every 8 hours.
 
 import { XMLParser } from "fast-xml-parser";
-import { reviewReason } from "./review.ts";
+import { DEFECT_LABEL, DEFECTS, reviewReason, type FindingCode } from "./review.ts";
 import { validateSubmission } from "./validate.ts";
 import type { FetchLike } from "./vendor/http.ts";
 import { IMPORTER_USER_AGENT } from "./vendor/http.ts";
@@ -34,7 +34,13 @@ import type { SubmissionRow } from "./types.ts";
 
 export const LISTINGS_PER_RUN = 4;
 export const SIGHTINGS_PER_RUN = 2;
-export const DORMANT_AFTER_MS = 72 * 3600 * 1000;
+const HOUR = 3600 * 1000;
+/** An unreachable listing is marked publicly after this — one bad night is not news. */
+export const UNREACHABLE_SHOWN_AFTER_MS = 24 * HOUR;
+/** …and withdrawn from the machine surfaces after this. */
+export const DORMANT_AFTER_MS = 72 * HOUR;
+/** A defect (review.ts) is marked at once, and withdraws the listing if it outlasts this. */
+export const DEFECT_GRACE_MS = 14 * 24 * HOUR;
 /** A blogroll is a publisher's curated list; past this it is an export, and we stop reading. */
 const MAX_BLOGROLL_ENTRIES = 200;
 const FETCH_TIMEOUT_MS = 10_000;
@@ -58,6 +64,70 @@ export const timedFetch: FetchLike = async (url, init) => {
 export function isDormant(failingSince: string | null, now: Date): boolean {
   if (!failingSince) return false;
   return now.getTime() - Date.parse(failingSince) >= DORMANT_AFTER_MS;
+}
+
+function olderThan(since: string | null, ms: number, now: Date): boolean {
+  return !!since && now.getTime() - Date.parse(since) >= ms;
+}
+
+export interface HealthFields {
+  failing_since: string | null;
+  defect_since: string | null;
+  flags: string | null;
+}
+
+/**
+ * Out of blygs.opml and listings.xml, still on the page. Comes back by itself:
+ * a successful check clears failing_since, and a clean one clears defect_since.
+ */
+export function isWithdrawn(r: HealthFields, now: Date): boolean {
+  return isDormant(r.failing_since, now) || olderThan(r.defect_since, DEFECT_GRACE_MS, now);
+}
+
+export interface PublicMark {
+  label: string;
+  title: string;
+}
+
+function day(iso: string): string {
+  return iso.slice(0, 10);
+}
+
+/** What the public page says about a listing's health. Defects and unreachability only. */
+export function publicMarks(r: HealthFields, now: Date): PublicMark[] {
+  const marks: PublicMark[] = [];
+  if (olderThan(r.failing_since, UNREACHABLE_SHOWN_AFTER_MS, now)) {
+    marks.push({ label: "unreachable", title: `Has failed every re-check since ${day(r.failing_since!)}.` });
+  } else {
+    // Flags are from the last *successful* check; while it is failing they are
+    // stale, and "unreachable" is the only thing worth saying.
+    for (const code of parseFlags(r.flags)) {
+      if (DEFECTS.has(code)) {
+        marks.push({
+          label: DEFECT_LABEL[code],
+          title: `Found by the re-check${r.defect_since ? ` since ${day(r.defect_since)}` : ""}.`,
+        });
+      }
+    }
+  }
+  if (isWithdrawn(r, now)) {
+    marks.push({ label: "withdrawn from feeds", title: "Left out of blygs.opml and listings.xml until fixed." });
+  }
+  return marks;
+}
+
+export function parseFlags(json: string | null): FindingCode[] {
+  try {
+    const v = JSON.parse(json ?? "[]");
+    return Array.isArray(v) ? v.filter((x): x is FindingCode => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** http://host/path → https://host/path, and nothing else counts as the same site. */
+function isTlsUpgrade(from: string | null, to: string | null): boolean {
+  return !!from && !!to && from.startsWith("http://") && to === "https://" + from.slice("http://".length);
 }
 
 /** What to resolve to re-check a listing: the blyg's origin, or the legacy row's feed. */
@@ -134,11 +204,27 @@ export async function runHealthPass(db: D1Database, fetchFn: FetchLike, now = ne
     let ok = false;
     let note: string | null = null;
     let warnings: string[] | null = null;
+    let flags: FindingCode[] | null = null;
     try {
       const v = await validateSubmission(recheckTarget(row), fetchFn);
+      let current = row.origin;
+      if (v.kind !== "failure" && v.origin !== row.origin && isTlsUpgrade(row.origin, v.origin)) {
+        // The operator added TLS and now redirects to it. Same site, so the
+        // listing follows — otherwise fixing "plain HTTP" would need a
+        // re-submission, and the old row would sit there marked forever.
+        // Skipped if the https origin is somehow listed separately.
+        const taken = await db.prepare(`SELECT 1 FROM submissions WHERE origin = ?`).bind(v.origin).first();
+        if (!taken) {
+          await db
+            .prepare(`UPDATE submissions SET origin = ?, home_url = ? WHERE id = ?`)
+            .bind(v.origin, v.homeUrl, row.id)
+            .run();
+          current = v.origin;
+        }
+      }
       if (v.kind === "failure") {
         note = v.note;
-      } else if (v.origin !== row.origin) {
+      } else if (v.origin !== current) {
         // Resolves, but to something else — most usefully a legacy feed that
         // has since become a blyg. Rewriting origin and kind under a live
         // listing is a re-listing, so it is reported to the admin and the
@@ -152,15 +238,17 @@ export async function runHealthPass(db: D1Database, fetchFn: FetchLike, now = ne
         // scheduled job does not delist on a third party's say-so.
         const r = reviewReason({ submittedUrl: row.submitted_url, validated: v });
         warnings = r.warnings;
+        flags = r.codes;
         if (r.block) note = `would now be held: ${r.block}`;
         if (v.kind === "blyg" && v.blogrollUrl) {
-          report.sightingsRecorded += await recordBlogroll(db, fetchFn, v.blogrollUrl, row.origin!, nowIso);
+          report.sightingsRecorded += await recordBlogroll(db, fetchFn, v.blogrollUrl, current!, nowIso);
         }
       }
     } catch (e) {
       note = `check threw: ${e instanceof Error ? e.message : String(e)}`;
     }
 
+    const hasDefect = flags ? flags.some((c) => DEFECTS.has(c)) : null;
     await db
       .prepare(
         `UPDATE submissions SET
@@ -168,10 +256,22 @@ export async function runHealthPass(db: D1Database, fetchFn: FetchLike, now = ne
            last_ok_at      = CASE WHEN ?2 THEN ?1 ELSE last_ok_at END,
            failing_since   = CASE WHEN ?2 THEN NULL ELSE COALESCE(failing_since, ?1) END,
            health_note     = ?3,
-           warnings        = COALESCE(?4, warnings)
-         WHERE id = ?5`,
+           warnings        = COALESCE(?4, warnings),
+           flags           = COALESCE(?5, flags),
+           defect_since    = CASE WHEN ?6 IS NULL THEN defect_since
+                                  WHEN ?6 THEN COALESCE(defect_since, ?1)
+                                  ELSE NULL END
+         WHERE id = ?7`,
       )
-      .bind(nowIso, ok ? 1 : 0, note, warnings ? JSON.stringify(warnings) : null, row.id)
+      .bind(
+        nowIso,
+        ok ? 1 : 0,
+        note,
+        warnings ? JSON.stringify(warnings) : null,
+        flags ? JSON.stringify(flags) : null,
+        hasDefect === null ? null : hasDefect ? 1 : 0,
+        row.id,
+      )
       .run();
     report.checked.push({ id: row.id, ok, note });
   }

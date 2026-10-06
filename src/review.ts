@@ -78,12 +78,41 @@ const IP_LITERAL = /^(\d{1,3}\.){3}\d{1,3}$|^\[?[0-9a-f]*:[0-9a-f:]*\]?$/i;
 // eslint-disable-next-line no-control-regex
 const DECEPTIVE_CHARS = /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/;
 
+/**
+ * A machine name for each warning, so the scheduled re-check can act on them
+ * without matching on prose. Ordered by tier (session 38, Venkat: "indicate
+ * health warnings on rechecks publicly and withdraw them from the opml/atom
+ * until fix if they stay in that state for a while"):
+ *
+ *   * **defect** — the site is wrong in a way a reader or a client meets.
+ *     Shown publicly from the re-check that finds it; a listing that keeps one
+ *     for DEFECT_GRACE_MS leaves the machine surfaces until it is fixed.
+ *   * **info** — true, and worth the operator knowing, but nothing is wrong.
+ *     Admin-only, never withdrawn. A public "internationalised domain" mark
+ *     would be us editorialising about a script.
+ *
+ * Unreachability is the third tier and is not a code here: it is a failed
+ * resolution, tracked by `failing_since` (health.ts).
+ */
+export type FindingCode = "site-mismatch" | "plain-http" | "private-host" | "ip-literal" | "idn";
+
+export const DEFECTS: ReadonlySet<FindingCode> = new Set(["site-mismatch", "plain-http", "private-host"]);
+
+/** Short public labels, for defects only. */
+export const DEFECT_LABEL: Record<string, string> = {
+  "site-mismatch": "manifest site mismatch",
+  "plain-http": "plain HTTP",
+  "private-host": "private address",
+};
+
 export interface ReviewVerdict {
   /**
    * A confirmed attack. `null` means list it. Non-null is the *only* thing that
    * keeps a submission out of the directory.
    */
   block: string | null;
+  /** One code per warning, same order. */
+  codes: FindingCode[];
   /**
    * Things wrong with the submission that are not attacks: listed anyway, shown
    * to the submitter, and their problem to fix rather than ours to adjudicate.
@@ -136,7 +165,12 @@ function assertedOrigin(note: string | null): string | null {
 export function reviewReason(input: ReviewInput): ReviewVerdict {
   const { validated: v, submittedUrl } = input;
   const warnings: string[] = [];
-  const block = (reason: string): ReviewVerdict => ({ block: reason, warnings });
+  const codes: FindingCode[] = [];
+  const block = (reason: string): ReviewVerdict => ({ block: reason, warnings, codes });
+  const warn = (code: FindingCode, text: string): void => {
+    codes.push(code);
+    warnings.push(text);
+  };
 
   if (v.kind === "failure") return block("did not resolve");
 
@@ -182,23 +216,24 @@ export function reviewReason(input: ReviewInput): ReviewVerdict {
 
   const claimed = assertedOrigin(v.note);
   if (v.note && v.note.includes("manifest asserts site")) {
-    warnings.push(
+    warn(
+      "site-mismatch",
       `Your manifest's \`site\` says ${claimed ?? "another address"}, but it is served from ${v.origin}. ` +
         "Readers and other clients use the address it is served from; update `site` so the two agree.",
     );
   }
   if (!/^https:/i.test(target)) {
-    warnings.push("Served over plain HTTP. Anyone on the network path can read and alter it — add TLS.");
+    warn("plain-http", "Served over plain HTTP. Anyone on the network path can read and alter it — add TLS.");
   }
   if (PRIVATE_HOST.test(host)) {
-    warnings.push(`${host} is a private or loopback address, so nobody else can reach it. Listed, but it will not work for readers.`);
+    warn("private-host", `${host} is a private or loopback address, so nobody else can reach it. Listed, but it will not work for readers.`);
   }
   if (IP_LITERAL.test(host)) {
-    warnings.push(`Listed at a bare IP address. It works, but it cannot move hosts and cannot be secured properly — a hostname is worth getting.`);
+    warn("ip-literal", `Listed at a bare IP address. It works, but it cannot move hosts and cannot be secured properly — a hostname is worth getting.`);
   }
   if (host.startsWith("xn--") || host.includes(".xn--") || /[^\x00-\x7F]/.test(host)) {
-    warnings.push(`${host} is an internationalised domain. Nothing is wrong with that — it is noted because such names can be hard to tell apart visually.`);
+    warn("idn", `${host} is an internationalised domain. Nothing is wrong with that — it is noted because such names can be hard to tell apart visually.`);
   }
 
-  return { block: null, warnings };
+  return { block: null, warnings, codes };
 }

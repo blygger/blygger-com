@@ -5,7 +5,8 @@
 
 import type { PublicRow, SubmissionRow } from "./types.ts";
 import { escapeHtml } from "./util.ts";
-import { isDormant, type UnlistedBlyg } from "./health.ts";
+import { isWithdrawn, parseFlags, publicMarks, type UnlistedBlyg } from "./health.ts";
+import { DEFECTS } from "./review.ts";
 
 const STYLE = `
 :root {
@@ -92,6 +93,10 @@ ul.blygs li { padding: 0.7rem 0; border-bottom: 1px solid var(--rule); display: 
   gap: 0.75rem; align-items: baseline; flex-wrap: wrap; }
 ul.blygs .name { font-size: 1.02rem; }
 ul.blygs .host { font-family: var(--sans); font-size: 0.8rem; color: var(--soft); }
+.health { font-family: var(--sans); font-size: 0.68rem; letter-spacing: 0.04em;
+  color: #b3412b; border: 1px dashed currentColor; border-radius: 2px; padding: 0.05rem 0.4rem;
+  cursor: help; }
+@media (prefers-color-scheme: dark) { .health { color: #e0806a; } }
 .mark { font-family: var(--sans); font-size: 0.68rem; letter-spacing: 0.06em;
   text-transform: uppercase; padding: 0.1rem 0.4rem; border-radius: 2px;
   border: 1px solid var(--rule); color: var(--soft); }
@@ -241,26 +246,30 @@ const TABS_SCRIPT = `
 })();
 `;
 
-function listItems(rows: PublicRow[], mark: string): string {
+function listItems(rows: PublicRow[], mark: string, now: Date): string {
   return rows
     .map((r) => {
       const home = r.home_url ?? "";
       const name = r.title?.trim() || hostOf(home);
+      // Re-check findings only (health.ts) — never what was seen at submission.
+      const health = publicMarks(r, now)
+        .map((m) => `<span class="health" title="${escapeHtml(m.title)}">${escapeHtml(m.label)}</span>`)
+        .join("");
       return `  <li>${mark}<a class="name" href="${escapeHtml(home)}">${escapeHtml(name)}</a>` +
-        `<span class="host">${escapeHtml(hostOf(home))}</span></li>`;
+        `<span class="host">${escapeHtml(hostOf(home))}</span>${health}</li>`;
     })
     .join("\n");
 }
 
-export function publicPage(rows: PublicRow[]): string {
+export function publicPage(rows: PublicRow[], now = new Date()): string {
   const blygs = rows.filter((r) => r.kind === "blyg");
   const legacy = rows.filter((r) => r.kind !== "blyg");
 
   const blygList = blygs.length
-    ? `<ul class="blygs">\n${listItems(blygs, '<span class="mark blyg" title="resolves as a blyg">blyg</span>')}\n</ul>`
+    ? `<ul class="blygs">\n${listItems(blygs, '<span class="mark blyg" title="resolves as a blyg">blyg</span>', now)}\n</ul>`
     : `<p class="empty">No blygs listed yet.</p>`;
   const legacyList = legacy.length
-    ? `<ul class="blygs">\n${listItems(legacy, '<span class="mark" title="a plain RSS or Atom feed">feed</span>')}\n</ul>`
+    ? `<ul class="blygs">\n${listItems(legacy, '<span class="mark" title="a plain RSS or Atom feed">feed</span>', now)}\n</ul>`
     : `<p class="empty">No feeds listed yet.</p>`;
 
   const body = `<h1>A directory of blygs</h1>
@@ -315,6 +324,10 @@ and a few plain feeds worth reading. Links go to the site itself, not to its fee
 <p class="tabhint">Every blyg below, as one file a feed reader or agent can import:
   <a href="/blygs.opml">blygs.opml</a>. To hear about new ones, subscribe to
   <a href="/listings.xml">listings.xml</a>.</p>
+<p class="tabhint">Every listing is re-checked several times a day. A dashed mark is
+  something the last check found. A blyg unreachable for three days, or carrying a
+  defect for two weeks, is left out of both files until it is fixed — it stays listed
+  here.</p>
 ${blygList}
 </div>
 <div class="panel" role="tabpanel" id="panel-legacy" aria-labelledby="tab-legacy">
@@ -381,9 +394,13 @@ function healthNote(r: SubmissionRow, now: Date): string {
   if (!r.last_checked_at) return `<div class="note">health: not checked yet</div>`;
   const when = r.last_checked_at.slice(0, 16).replace("T", " ");
   const detail = r.health_note ? ` — ${escapeHtml(r.health_note)}` : "";
+  const out = isWithdrawn(r, now) ? " · withdrawn from OPML and feed" : "";
   if (r.failing_since) {
-    const state = isDormant(r.failing_since, now) ? "dormant (out of OPML and feed)" : "failing";
-    return `<div class="note warn">health: ${state} since ${escapeHtml(r.failing_since.slice(0, 16).replace("T", " "))}${detail}</div>`;
+    return `<div class="note warn">health: failing since ${escapeHtml(r.failing_since.slice(0, 16).replace("T", " "))}${out}${detail}</div>`;
+  }
+  const defects = parseFlags(r.flags).filter((c) => DEFECTS.has(c));
+  if (defects.length) {
+    return `<div class="note warn">health: ${escapeHtml(defects.join(", "))} since ${escapeHtml((r.defect_since ?? "").slice(0, 10))} (checked ${escapeHtml(when)})${out}${detail}</div>`;
   }
   return `<div class="note">health: ok at ${escapeHtml(when)}${detail}</div>`;
 }
@@ -470,12 +487,13 @@ export function feedUrlOf(r: PublicRow): string | null {
 }
 
 /**
- * The blygs the machine surfaces hand out: listed, and not dormant. A dormant
- * listing has failed every health check for 72 hours (health.ts); it stays on
- * the page, but an agent following the export would only be polling a corpse.
+ * The blygs the machine surfaces hand out: listed, and not withdrawn — not
+ * unreachable for 72 hours, not carrying a defect for 14 days (health.ts). A
+ * withdrawn listing stays on the page, marked; an agent following the export
+ * should not be sent to it until it is fixed.
  */
 function machineBlygs(rows: PublicRow[], now: Date): PublicRow[] {
-  return rows.filter((r) => r.kind === "blyg" && !isDormant(r.failing_since, now));
+  return rows.filter((r) => r.kind === "blyg" && !isWithdrawn(r, now));
 }
 
 /**

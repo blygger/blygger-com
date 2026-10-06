@@ -105,8 +105,8 @@ describe("the directory splits blygs from legacy RSS", () => {
   it("each kind renders in its own panel", async () => {
     const { publicPage } = await import("../src/pages.ts");
     const html = publicPage([
-      { kind: "blyg", title: "A Blyg", home_url: "https://b.example/", origin: "https://b.example/", listed_at: "2026-10-01T00:00:00Z", failing_since: null },
-      { kind: "rss", title: "A Feed", home_url: "https://f.example/", origin: "https://f.example/rss", listed_at: "2026-10-01T00:00:00Z", failing_since: null },
+      { kind: "blyg", title: "A Blyg", home_url: "https://b.example/", origin: "https://b.example/", listed_at: "2026-10-01T00:00:00Z", failing_since: null, flags: null, defect_since: null },
+      { kind: "rss", title: "A Feed", home_url: "https://f.example/", origin: "https://f.example/rss", listed_at: "2026-10-01T00:00:00Z", failing_since: null, flags: null, defect_since: null },
     ]);
     const blygs = html.slice(html.indexOf('id="panel-blygs"'), html.indexOf('id="panel-legacy"'));
     const legacy = html.slice(html.indexOf('id="panel-legacy"'));
@@ -301,6 +301,8 @@ describe("every inline script parses", () => {
           last_ok_at: null,
           failing_since: null,
           health_note: null,
+          flags: null,
+          defect_since: null,
           review_reason: null,
           warnings: null,
           contact: "someone@a.example",
@@ -690,15 +692,20 @@ describe("dormancy", () => {
     const { blygsOpml, listingsAtom, publicPage } = await import("../src/pages.ts");
     const rows = [
       { kind: "blyg" as const, title: "Alive", home_url: "https://alive.example/", origin: "https://alive.example/",
-        listed_at: "2026-10-01T00:00:00Z", failing_since: "2026-10-06T00:00:00Z" },
+        listed_at: "2026-10-01T00:00:00Z", failing_since: "2026-10-06T00:00:00Z", flags: null, defect_since: null },
       { kind: "blyg" as const, title: "Gone", home_url: "https://gone.example/", origin: "https://gone.example/",
-        listed_at: "2026-10-01T00:00:00Z", failing_since: "2026-09-01T00:00:00Z" },
+        listed_at: "2026-10-01T00:00:00Z", failing_since: "2026-09-01T00:00:00Z", flags: null, defect_since: null },
     ];
     const now = new Date("2026-10-06T12:00:00Z");
     expect(blygsOpml(rows, now)).toContain("Alive");
     expect(blygsOpml(rows, now)).not.toContain("Gone");
     expect(listingsAtom(rows, now)).not.toContain("Gone");
-    expect(publicPage(rows)).toContain("Gone");
+    const page = publicPage(rows, now);
+    expect(page).toContain("Gone");
+    expect(page).toContain(">withdrawn from feeds<");
+    // Alive has been failing 12 hours: not news yet.
+    const alive = page.slice(page.indexOf("Alive"), page.indexOf("</li>", page.indexOf("Alive")));
+    expect(alive).not.toContain('class="health"');
   });
 });
 
@@ -771,5 +778,80 @@ describe("the health pass", () => {
     </body></opml>`);
     expect(got.map((g) => g.feedUrl)).toEqual(["https://a.example/feed", "http://b.example/rss"]);
     expect(parseBlogroll("not xml at all <<<")).toEqual([]);
+  });
+});
+
+describe("public health marks and withdrawal (migration 0006)", () => {
+  const base = { kind: "blyg" as const, title: "T", home_url: "https://t.example/", origin: "https://t.example/",
+    listed_at: "2026-09-01T00:00:00Z", failing_since: null };
+  const now = new Date("2026-10-06T12:00:00Z");
+
+  it("defects are marked at once and withdraw after 14 days; info codes are never public", async () => {
+    const { publicMarks, isWithdrawn } = await import("../src/health.ts");
+    const fresh = { ...base, flags: '["site-mismatch","idn"]', defect_since: "2026-10-05T00:00:00Z" };
+    expect(publicMarks(fresh, now).map((m) => m.label)).toEqual(["manifest site mismatch"]);
+    expect(isWithdrawn(fresh, now)).toBe(false);
+    const old = { ...fresh, defect_since: "2026-09-20T00:00:00Z" };
+    expect(isWithdrawn(old, now)).toBe(true);
+    expect(publicMarks(old, now).map((m) => m.label)).toEqual(["manifest site mismatch", "withdrawn from feeds"]);
+    const infoOnly = { ...base, flags: '["idn","ip-literal"]', defect_since: null };
+    expect(publicMarks(infoOnly, now)).toEqual([]);
+  });
+
+  it("unreachable is shown after 24 hours and replaces stale flags", async () => {
+    const { publicMarks } = await import("../src/health.ts");
+    const r = { ...base, failing_since: "2026-10-05T00:00:00Z", flags: '["plain-http"]', defect_since: "2026-10-01T00:00:00Z" };
+    expect(publicMarks(r, now).map((m) => m.label)).toEqual(["unreachable"]);
+  });
+
+  it("the re-check records defects, keeps their start, clears them when fixed", async () => {
+    const { runHealthPass } = await import("../src/health.ts");
+    const { insertSubmission, getById } = await import("../src/store.ts");
+    await env.DB.prepare(`DELETE FROM submissions`).run();
+    const id = await insertSubmission(env.DB, {
+      submittedUrl: "https://d.example/", kind: "blyg", origin: "https://d.example/", title: "D",
+      homeUrl: "https://d.example/", resolveNote: null, contact: null, reviewReason: null, warnings: [],
+    });
+    const site = (asserted: string) => stubFetch({
+      "https://d.example/": { body: '<link rel="blyg" href="/blyg.json">' },
+      "https://d.example/blyg.json": { body: MANIFEST(asserted), type: "application/json" },
+    });
+    await runHealthPass(env.DB, site("https://elsewhere.example/") as any, new Date("2026-10-01T00:00:00Z"));
+    await runHealthPass(env.DB, site("https://elsewhere.example/") as any, new Date("2026-10-02T00:00:00Z"));
+    let row = await getById(env.DB, id);
+    expect(JSON.parse(row!.flags!)).toEqual(["site-mismatch"]);
+    expect(row?.defect_since).toBe("2026-10-01T00:00:00.000Z");
+    expect(await (await get("/")).text()).toContain(">manifest site mismatch<");
+
+    await runHealthPass(env.DB, site("https://d.example/") as any, new Date("2026-10-03T00:00:00Z"));
+    row = await getById(env.DB, id);
+    expect(row?.flags).toBe("[]");
+    expect(row?.defect_since).toBeNull();
+    expect(await (await get("/")).text()).not.toContain('class="health"');
+    await env.DB.prepare(`DELETE FROM submissions`).run();
+  });
+
+  it("a listing that moves from http to https follows, and loses its mark", async () => {
+    const { runHealthPass } = await import("../src/health.ts");
+    const { insertSubmission, getById } = await import("../src/store.ts");
+    await env.DB.prepare(`DELETE FROM submissions`).run();
+    const id = await insertSubmission(env.DB, {
+      submittedUrl: "http://tls.example/", kind: "blyg", origin: "http://tls.example/", title: "TLS",
+      homeUrl: "http://tls.example/", resolveNote: null, contact: null, reviewReason: null, warnings: [],
+    });
+    // The http origin redirects: the final URL the resolver sees is https.
+    const redirecting = async (url: string): Promise<FetchResult> => {
+      const target = url.replace(/^http:/, "https:");
+      return stubFetch({
+        "https://tls.example/": { body: '<link rel="blyg" href="/blyg.json">' },
+        "https://tls.example/blyg.json": { body: MANIFEST("https://tls.example/"), type: "application/json" },
+      })(target).then((r) => ({ ...r, url: target }));
+    };
+    await runHealthPass(env.DB, redirecting as any, new Date("2026-10-01T00:00:00Z"));
+    const row = await getById(env.DB, id);
+    expect(row?.origin).toBe("https://tls.example/");
+    expect(row?.home_url).toBe("https://tls.example/");
+    expect(row?.flags).toBe("[]");
+    await env.DB.prepare(`DELETE FROM submissions`).run();
   });
 });

@@ -90,14 +90,17 @@ npx wrangler d1 migrations apply blygger-com --remote   # when migrations change
   something only they can fix, and we have no way to nudge them.
 
   What needs deciding, roughly in this order:
-  1. **Does a listing carry its warnings publicly?** A quiet "served over HTTP"
-     beside an entry is honest and is pressure; it is also us editorialising
-     about someone else's site on our page. Probably yes for facts a reader
-     cares about (plaintext, unreachable) and no for the rest.
+  1. ~~**Does a listing carry its warnings publicly?**~~ Ruled by Venkat,
+     session 38: yes, from re-checks, and persistent ones withdraw the listing
+     from `blygs.opml`/`listings.xml` until fixed. Built as three tiers
+     (`review.ts` `FindingCode`/`DEFECTS`, thresholds in `health.ts`):
+     unreachable — shown after 24 h, withdrawn after 72 h; **defects**
+     (site mismatch, plain HTTP, private host) — shown at once, withdrawn after
+     14 days; **info** (bare IP, IDN) — admin only, never withdrawn.
+     Submission-time findings are never shown publicly; only re-checks are.
   2. ~~**Re-checking on a schedule.**~~ Built session 38 (`src/health.ts`,
-     migration 0005): hourly cron, warnings rewritten on every successful
-     check, dormant listings dropped from the machine surfaces only. Item 1
-     is still open, so nothing about health is shown on the public page.
+     migrations 0005–0006): hourly cron, warnings and flags rewritten on every
+     successful check, an http→https move followed in place.
   3. **Telling them.** We collect an optional contact for security releases
      (migration 0002) and have never used it. A warning is not a security
      release, so reusing that channel needs a decision, not an assumption.
@@ -105,8 +108,12 @@ npx wrangler d1 migrations apply blygger-com --remote   # when migrations change
      entry. That is the missing piece under all of the above — "check your
      directory entry" presumes an entry to check.
 
-  Do not build 2–4 before 1: whether warnings are public changes what the rest
-  of it is for.
+  1 and 2 are done; 3 and 4 remain. **Conformance is not here yet:** the
+  re-check is the submission check (resolver + `review.ts`), and records
+  nothing about protocol version or feed validity. The real validator is
+  blygger-spec roadmap 1.4 / decision #48 (`blygger-spec/conformance/`, not
+  built); this directory should become its first consumer rather than grow
+  its own.
 
 ## Status
 

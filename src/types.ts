@@ -32,6 +32,8 @@ export interface SubmissionRow {
   failing_since: string | null;
   /** Admin-only. */
   health_note: string | null;
+  flags: string | null;
+  defect_since: string | null;
 }
 
 /**
@@ -52,4 +54,7 @@ export interface PublicRow {
   listed_at: string;
   /** Start of the current run of failed health checks (migration 0005), or null. */
   failing_since: string | null;
+  /** Migration 0006: finding codes from the last successful re-check, and the defect run's start. */
+  flags: string | null;
+  defect_since: string | null;
 }
