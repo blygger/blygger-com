@@ -113,7 +113,8 @@ npx wrangler d1 migrations apply blygger-com --remote   # when migrations change
   nothing about protocol version or feed validity. The real validator is
   blygger-spec roadmap 1.4 / decision #48 (`blygger-spec/conformance/`, not
   built); this directory should become its first consumer rather than grow
-  its own.
+  its own. **Options filed as [#1](https://github.com/blygger/blygger-com/issues/1),
+  deferred until blygger-spec#11 merges.**
 
 ## Status
 
