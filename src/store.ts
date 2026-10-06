@@ -17,7 +17,7 @@ import { newId, nowIso } from "./util.ts";
 export async function listApproved(db: D1Database): Promise<PublicRow[]> {
   const { results } = await db
     .prepare(
-      `SELECT kind, title, home_url, origin, failing_since, flags, defect_since,
+      `SELECT kind, title, home_url, origin, failing_since, flags, defect_since, protocol, level, generator,
               COALESCE(reviewed_at, submitted_at) AS listed_at FROM submissions
        WHERE status = 'approved' AND home_url IS NOT NULL
        ORDER BY submitted_at DESC`,
@@ -93,6 +93,8 @@ export interface NewSubmission {
   reviewReason: string | null;
   /** Ambiguous findings, shown to the operator. Listed regardless. */
   warnings: string[];
+  /** What a blyg's manifest declares (migration 0007); omitted for feeds. */
+  census?: { protocol: string | null; level: number | null; generator: string | null };
 }
 
 /**
@@ -109,10 +111,12 @@ export async function insertSubmission(db: D1Database, s: NewSubmission): Promis
   await db
     .prepare(
       `INSERT INTO submissions
-         (id, submitted_url, kind, origin, title, home_url, resolve_note, status, submitted_at, contact, review_reason, warnings)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, submitted_url, kind, origin, title, home_url, resolve_note, status, submitted_at, contact, review_reason, warnings,
+          protocol, level, generator)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(id, s.submittedUrl, s.kind, s.origin, s.title, s.homeUrl, s.resolveNote, status, nowIso(), s.contact, s.reviewReason, JSON.stringify(s.warnings))
+    .bind(id, s.submittedUrl, s.kind, s.origin, s.title, s.homeUrl, s.resolveNote, status, nowIso(), s.contact, s.reviewReason, JSON.stringify(s.warnings),
+      s.census?.protocol ?? null, s.census?.level ?? null, s.census?.generator ?? null)
     .run();
   return id;
 }

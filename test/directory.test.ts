@@ -105,8 +105,8 @@ describe("the directory splits blygs from legacy RSS", () => {
   it("each kind renders in its own panel", async () => {
     const { publicPage } = await import("../src/pages.ts");
     const html = publicPage([
-      { kind: "blyg", title: "A Blyg", home_url: "https://b.example/", origin: "https://b.example/", listed_at: "2026-10-01T00:00:00Z", failing_since: null, flags: null, defect_since: null },
-      { kind: "rss", title: "A Feed", home_url: "https://f.example/", origin: "https://f.example/rss", listed_at: "2026-10-01T00:00:00Z", failing_since: null, flags: null, defect_since: null },
+      { kind: "blyg", title: "A Blyg", home_url: "https://b.example/", origin: "https://b.example/", listed_at: "2026-10-01T00:00:00Z", failing_since: null, flags: null, defect_since: null, protocol: null, level: null, generator: null },
+      { kind: "rss", title: "A Feed", home_url: "https://f.example/", origin: "https://f.example/rss", listed_at: "2026-10-01T00:00:00Z", failing_since: null, flags: null, defect_since: null, protocol: null, level: null, generator: null },
     ]);
     const blygs = html.slice(html.indexOf('id="panel-blygs"'), html.indexOf('id="panel-legacy"'));
     const legacy = html.slice(html.indexOf('id="panel-legacy"'));
@@ -303,6 +303,9 @@ describe("every inline script parses", () => {
           health_note: null,
           flags: null,
           defect_since: null,
+          protocol: "0.2",
+          level: 2,
+          generator: "x/1",
           review_reason: null,
           warnings: null,
           contact: "someone@a.example",
@@ -692,9 +695,9 @@ describe("dormancy", () => {
     const { blygsOpml, listingsAtom, publicPage } = await import("../src/pages.ts");
     const rows = [
       { kind: "blyg" as const, title: "Alive", home_url: "https://alive.example/", origin: "https://alive.example/",
-        listed_at: "2026-10-01T00:00:00Z", failing_since: "2026-10-06T00:00:00Z", flags: null, defect_since: null },
+        listed_at: "2026-10-01T00:00:00Z", failing_since: "2026-10-06T00:00:00Z", flags: null, defect_since: null, protocol: null, level: null, generator: null },
       { kind: "blyg" as const, title: "Gone", home_url: "https://gone.example/", origin: "https://gone.example/",
-        listed_at: "2026-10-01T00:00:00Z", failing_since: "2026-09-01T00:00:00Z", flags: null, defect_since: null },
+        listed_at: "2026-10-01T00:00:00Z", failing_since: "2026-09-01T00:00:00Z", flags: null, defect_since: null, protocol: null, level: null, generator: null },
     ];
     const now = new Date("2026-10-06T12:00:00Z");
     expect(blygsOpml(rows, now)).toContain("Alive");
@@ -783,7 +786,7 @@ describe("the health pass", () => {
 
 describe("public health marks and withdrawal (migration 0006)", () => {
   const base = { kind: "blyg" as const, title: "T", home_url: "https://t.example/", origin: "https://t.example/",
-    listed_at: "2026-09-01T00:00:00Z", failing_since: null };
+    listed_at: "2026-09-01T00:00:00Z", failing_since: null, protocol: null, level: null, generator: null };
   const now = new Date("2026-10-06T12:00:00Z");
 
   it("defects are marked at once and withdraw after 14 days; info codes are never public", async () => {
@@ -852,6 +855,43 @@ describe("public health marks and withdrawal (migration 0006)", () => {
     expect(row?.origin).toBe("https://tls.example/");
     expect(row?.home_url).toBe("https://tls.example/");
     expect(row?.flags).toBe("[]");
+    await env.DB.prepare(`DELETE FROM submissions`).run();
+  });
+});
+
+describe("protocol census (migration 0007)", () => {
+  it("reads the manifest defensively", async () => {
+    const { manifestCensus } = await import("../src/validate.ts");
+    expect(manifestCensus({ blyg: "0.3", level: 2, generator: "blygger-studio/0.32.1" }))
+      .toEqual({ protocol: "0.3", level: 2, generator: "blygger-studio/0.32.1" });
+    expect(manifestCensus({ blyg: "<script>", level: "2", generator: "" }))
+      .toEqual({ protocol: null, level: null, generator: null });
+    expect(manifestCensus({ blyg: 0.2 }).protocol).toBe("0.2");
+  });
+
+  it("is stored at submission, refreshed by the re-check, and shown beside the blyg", async () => {
+    const { runHealthPass } = await import("../src/health.ts");
+    const { insertSubmission, getById } = await import("../src/store.ts");
+    await env.DB.prepare(`DELETE FROM submissions`).run();
+    const id = await insertSubmission(env.DB, {
+      submittedUrl: "https://v.example/", kind: "blyg", origin: "https://v.example/", title: "Versioned",
+      homeUrl: "https://v.example/", resolveNote: null, contact: null, reviewReason: null, warnings: [],
+      census: { protocol: "0.2", level: 1, generator: "old/1.0" },
+    });
+    let page = await (await get("/")).text();
+    expect(page).toContain('class="ver behind"');
+    expect(page).toContain("v0.2");
+
+    await runHealthPass(env.DB, stubFetch({
+      "https://v.example/": { body: '<link rel="blyg" href="/blyg.json">' },
+      "https://v.example/blyg.json": {
+        body: MANIFEST("https://v.example/", { blyg: "0.3", level: 2, generator: "new/2.0" }), type: "application/json",
+      },
+    }) as any, new Date("2026-10-01T00:00:00Z"));
+    const row = await getById(env.DB, id);
+    expect([row?.protocol, row?.level, row?.generator]).toEqual(["0.3", 2, "new/2.0"]);
+    page = await (await get("/")).text();
+    expect(page).toContain('<span class="ver" title="protocol 0.3 · level 2 · generator: new/2.0">v0.3</span>');
     await env.DB.prepare(`DELETE FROM submissions`).run();
   });
 });

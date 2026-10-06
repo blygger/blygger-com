@@ -27,7 +27,7 @@
 
 import { XMLParser } from "fast-xml-parser";
 import { DEFECT_LABEL, DEFECTS, reviewReason, type FindingCode } from "./review.ts";
-import { validateSubmission } from "./validate.ts";
+import { validateSubmission, type Census } from "./validate.ts";
 import type { FetchLike } from "./vendor/http.ts";
 import { IMPORTER_USER_AGENT } from "./vendor/http.ts";
 import type { SubmissionRow } from "./types.ts";
@@ -205,6 +205,7 @@ export async function runHealthPass(db: D1Database, fetchFn: FetchLike, now = ne
     let note: string | null = null;
     let warnings: string[] | null = null;
     let flags: FindingCode[] | null = null;
+    let census: Census | null = null;
     try {
       const v = await validateSubmission(recheckTarget(row), fetchFn);
       let current = row.origin;
@@ -239,6 +240,7 @@ export async function runHealthPass(db: D1Database, fetchFn: FetchLike, now = ne
         const r = reviewReason({ submittedUrl: row.submitted_url, validated: v });
         warnings = r.warnings;
         flags = r.codes;
+        census = v.census ?? null;
         if (r.block) note = `would now be held: ${r.block}`;
         if (v.kind === "blyg" && v.blogrollUrl) {
           report.sightingsRecorded += await recordBlogroll(db, fetchFn, v.blogrollUrl, current!, nowIso);
@@ -260,7 +262,10 @@ export async function runHealthPass(db: D1Database, fetchFn: FetchLike, now = ne
            flags           = COALESCE(?5, flags),
            defect_since    = CASE WHEN ?6 IS NULL THEN defect_since
                                   WHEN ?6 THEN COALESCE(defect_since, ?1)
-                                  ELSE NULL END
+                                  ELSE NULL END,
+           protocol        = CASE WHEN ?8 THEN ?9  ELSE protocol  END,
+           level           = CASE WHEN ?8 THEN ?10 ELSE level     END,
+           generator       = CASE WHEN ?8 THEN ?11 ELSE generator END
          WHERE id = ?7`,
       )
       .bind(
@@ -271,6 +276,10 @@ export async function runHealthPass(db: D1Database, fetchFn: FetchLike, now = ne
         flags ? JSON.stringify(flags) : null,
         hasDefect === null ? null : hasDefect ? 1 : 0,
         row.id,
+        census ? 1 : 0,
+        census?.protocol ?? null,
+        census?.level ?? null,
+        census?.generator ?? null,
       )
       .run();
     report.checked.push({ id: row.id, ok, note });

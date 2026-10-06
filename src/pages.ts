@@ -7,6 +7,7 @@ import type { PublicRow, SubmissionRow } from "./types.ts";
 import { escapeHtml } from "./util.ts";
 import { isWithdrawn, parseFlags, publicMarks, type UnlistedBlyg } from "./health.ts";
 import { DEFECTS } from "./review.ts";
+import { CURRENT_PROTOCOL, protocolBehind } from "./validate.ts";
 
 const STYLE = `
 :root {
@@ -93,6 +94,8 @@ ul.blygs li { padding: 0.7rem 0; border-bottom: 1px solid var(--rule); display: 
   gap: 0.75rem; align-items: baseline; flex-wrap: wrap; }
 ul.blygs .name { font-size: 1.02rem; }
 ul.blygs .host { font-family: var(--sans); font-size: 0.8rem; color: var(--soft); }
+.ver { font-family: var(--sans); font-size: 0.68rem; color: var(--soft); cursor: help; }
+.ver.behind { text-decoration: underline dotted; }
 .health { font-family: var(--sans); font-size: 0.68rem; letter-spacing: 0.04em;
   color: #b3412b; border: 1px dashed currentColor; border-radius: 2px; padding: 0.05rem 0.4rem;
   cursor: help; }
@@ -246,6 +249,22 @@ const TABS_SCRIPT = `
 })();
 `;
 
+/**
+ * The manifest's declared version, quietly. Behind-current is noted, not
+ * flagged: a 0.2 blyg is a conformant 0.2 blyg, and nothing is withdrawn for
+ * it. Generator and level go in the tooltip — informative only (§3.2).
+ */
+function versionMark(r: PublicRow): string {
+  if (r.kind !== "blyg" || !r.protocol) return "";
+  const behind = protocolBehind(r.protocol, CURRENT_PROTOCOL);
+  const bits = [
+    `protocol ${r.protocol}${behind ? ` (current is ${CURRENT_PROTOCOL})` : ""}`,
+    r.level != null ? `level ${r.level}` : null,
+    r.generator ? `generator: ${r.generator}` : null,
+  ].filter(Boolean);
+  return `<span class="ver${behind ? " behind" : ""}" title="${escapeHtml(bits.join(" · "))}">v${escapeHtml(r.protocol)}</span>`;
+}
+
 function listItems(rows: PublicRow[], mark: string, now: Date): string {
   return rows
     .map((r) => {
@@ -256,7 +275,7 @@ function listItems(rows: PublicRow[], mark: string, now: Date): string {
         .map((m) => `<span class="health" title="${escapeHtml(m.title)}">${escapeHtml(m.label)}</span>`)
         .join("");
       return `  <li>${mark}<a class="name" href="${escapeHtml(home)}">${escapeHtml(name)}</a>` +
-        `<span class="host">${escapeHtml(hostOf(home))}</span>${health}</li>`;
+        `<span class="host">${escapeHtml(hostOf(home))}</span>${versionMark(r)}${health}</li>`;
     })
     .join("\n");
 }
@@ -454,7 +473,7 @@ ${rows
     return `<tr>
   <td><a href="${escapeHtml(home)}">${escapeHtml(r.title?.trim() || hostOf(home))}</a>
       <div class="note">submitted: ${escapeHtml(r.submitted_url)}</div>${note}${held}${warned}${healthNote(r, now)}</td>
-  <td>${escapeHtml(r.kind ?? "—")}</td>
+  <td>${escapeHtml(r.kind ?? "—")}${r.protocol ? `<div class="note">v${escapeHtml(r.protocol)}${r.level != null ? ` L${r.level}` : ""}</div>` : ""}${r.generator ? `<div class="note">${escapeHtml(r.generator)}</div>` : ""}</td>
   <td class="note">${r.contact ? escapeHtml(r.contact) : "—"}</td>
   <td class="status-${escapeHtml(r.status)}">${escapeHtml(r.status)}</td>
   <td>

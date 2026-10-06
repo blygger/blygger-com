@@ -34,6 +34,10 @@ export interface SubmissionRow {
   health_note: string | null;
   flags: string | null;
   defect_since: string | null;
+  /** Migration 0007: the manifest's self-description. Null on feeds. */
+  protocol: string | null;
+  level: number | null;
+  generator: string | null;
 }
 
 /**
@@ -57,4 +61,8 @@ export interface PublicRow {
   /** Migration 0006: finding codes from the last successful re-check, and the defect run's start. */
   flags: string | null;
   defect_since: string | null;
+  /** Migration 0007: the manifest's self-description. Null on feeds. */
+  protocol: string | null;
+  level: number | null;
+  generator: string | null;
 }
