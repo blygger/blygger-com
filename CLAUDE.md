@@ -11,6 +11,14 @@ box and a list of approved sites, built session 21 (2026-09-16).
 it would be one of the two initial cross-client test instances; session 11 put
 those on `venkateshrao.com/blyg/` and `blyg.protocol-institute.org` instead.
 
+## Voice
+
+Read [`VOICE.md`](VOICE.md) before writing any page copy, form text, message or
+reply in the project's name. **Speak for the ecosystem and everyone building it;
+nobody is an outsider** — no "we/us/ours" set against "strangers" or "other
+people's". `VOICE.md` is kept as identical copies in blygger-org and blygger-com:
+change both in the same sitting (`cmp` them).
+
 ## Stack
 
 Cloudflare Worker + D1 + Hono + TypeScript — deliberately the same stack as the

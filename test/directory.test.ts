@@ -262,7 +262,7 @@ describe("submission endpoint", () => {
     const before = await env.DB.prepare(`SELECT COUNT(*) AS n FROM submissions`).first<{ n: number }>();
     const r = await postJson("/api/submit", { url: "https://definitely-not-real.invalid/" });
     expect(r.status).toBe(422);
-    expect(r.json.message).toContain("couldn't find");
+    expect(r.json.message).toContain("No blyg or feed found");
     const after = await env.DB.prepare(`SELECT COUNT(*) AS n FROM submissions`).first<{ n: number }>();
     expect(after!.n).toBe(before!.n);
   });

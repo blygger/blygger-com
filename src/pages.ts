@@ -148,7 +148,7 @@ function layout(title: string, body: string, script = ""): string {
 ${body}
 <footer>
   A directory of blygs. The protocol lives at <a href="https://blygger.org">blygger.org</a>.
-  Listing is manual and a listing is not an endorsement.
+  Blygs list themselves here, and a listing is not an endorsement.
 </footer>
 </div>
 ${script ? `<script>${script}</script>` : ""}
@@ -308,11 +308,12 @@ and a few plain feeds worth reading. Links go to the site itself, not to its fee
       <input type="url" id="url" name="url" placeholder="https://yoursite.com/blyg/" required>
       <button type="submit">Submit</button>
     </div>
-    <p class="hint">Your site URL or your feed URL — either works. We resolve it the way a
-      blyg client would, and if it resolves cleanly it is listed straight away. A few
-      things hold a submission for a human to look at — a manifest claiming an origin it
-      is not served from, a plaintext link, a name another listing already uses — and
-      you are told which.</p>
+    <p class="hint">Your site URL or your feed URL — either works. The directory resolves
+      it the way a blyg client would, and if it resolves it is listed straight away.
+      Only a confirmed problem holds a submission for review — credentials in the URL,
+      or control characters in the name — and the same blyg already listed at another
+      address is turned away. Anything else worth fixing is listed with a note telling
+      you what it is.</p>
   </div>
   <div class="field">
     <label for="contact">Contact (optional)</label>
@@ -320,18 +321,18 @@ and a few plain feeds worth reading. Links go to the site itself, not to its fee
       <input type="text" id="contact" name="contact" placeholder="email, handle, or a contact page"
         autocomplete="email" maxlength="200">
     </div>
-    <p class="hint"><strong>Never published, and never shown to anyone but us.</strong>
+    <p class="hint"><strong>Never published; only the directory's maintainer sees it.</strong>
       It is here for one purpose: if the software running your blyg gets a security
-      fix, this is how we tell you. A directory that publishes your origin and
-      cannot reach you is exactly the situation we were in this month.</p>
+      fix, it is how you hear about it. A directory that publishes an address and
+      cannot reach the person running it has already happened once.</p>
   </div>
   <p id="msg"></p>
   <p class="hint repo-note"><strong>Built or modified a client?</strong> That is a
     different thing from the site you just submitted, and it belongs on the
     <a href="https://blygger.org/ecosystem/">ecosystem page</a> —
     <a href="https://github.com/blygger/blygger-org/issues/new?template=project.yml">submit the
-    repo here</a>. Half-finished is fine; so is someone else's, and we will check with
-    them. Worth doing even for a fork or a private mod: the census can see that
+    repo here</a>. Half-finished is fine; so is someone else's, and its author is asked
+    before it is listed. Worth doing even for a fork or a private mod: the index can see that
     <em>some</em> client published a blyg, because the manifest carries a
     <code>generator</code> string — it cannot see whose it is or where to read the code.</p>
 </form>

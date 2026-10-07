@@ -65,7 +65,7 @@ app.post("/api/submit", async (c) => {
   type SubmitBody = { url?: string; contact?: string };
   const body = await c.req.json<SubmitBody>().catch(() => ({}) as SubmitBody);
   const url = (body.url ?? "").trim();
-  if (!url) return c.json({ message: "Give us a URL." }, 400);
+  if (!url) return c.json({ message: "Enter a URL." }, 400);
   if (url.length > 2048) return c.json({ message: "That URL is implausibly long." }, 400);
   // Optional and unvalidated beyond a length cap and whitespace: an email, a
   // handle, a contact page — all of them fine. The purpose is a channel for a
@@ -82,7 +82,7 @@ app.post("/api/submit", async (c) => {
     return c.json(
       {
         message:
-          "We couldn't find a blyg or a feed there. Check the URL resolves publicly, " +
+          "No blyg or feed found there. Check the URL resolves publicly, " +
           "or submit your feed URL directly.",
         detail: v.note,
       },
