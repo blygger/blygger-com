@@ -1,7 +1,8 @@
 // The whole site: one public page, one admin page. Server-rendered, no build
-// step, no framework. The visual language deliberately echoes blygger.org
-// (monospace wordmark, orange accent, generous measure) so the two read as one
-// project without sharing a stylesheet across origins.
+// step, no framework. The type and layout echo blygger.org (monospace
+// wordmark, serif body, generous measure) so the two read as one project; the
+// colour does not — blue here, orange there — so they read as two sites
+// (Venkat, session 38). No stylesheet is shared across the origins.
 
 import type { PublicRow, SubmissionRow } from "./types.ts";
 import { escapeHtml } from "./util.ts";
@@ -12,13 +13,16 @@ import { CURRENT_PROTOCOL, protocolBehind } from "./validate.ts";
 const STYLE = `
 :root {
   color-scheme: light dark;
-  --page: #faf9f6; --ink: #1a1a18; --soft: #6b6b66; --rule: #e6e4de;
-  --accent: #d95a1f;
+  /* Blue, where blygger.org is orange (session 38: the two sites read as one).
+     Contrast-checked: accent and soft text >= 5.6:1 on the page, both themes. */
+  --page: #f6f8fb; --ink: #151a22; --soft: #5b6474; --rule: #dce3ed;
+  --accent: #1f5fc2; --on-accent: #ffffff;
   --sans: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --serif: "Iowan Old Style", Palatino, Charter, Georgia, serif;
 }
 @media (prefers-color-scheme: dark) {
-  :root { --page:#16161a; --ink:#e8e6e1; --soft:#9a978f; --rule:#2c2c31; --accent:#e8763f; }
+  /* White on this blue is 2.5:1, so text on accent is the page colour (7.2:1). */
+  :root { --page:#11151c; --ink:#e3e8f0; --soft:#949db0; --rule:#252d3a; --accent:#6ea4f7; --on-accent:#11151c; }
 }
 * { box-sizing: border-box; }
 body { background: var(--page); color: var(--ink); font-family: var(--serif);
@@ -44,8 +48,8 @@ details.add-wrap > summary { display: inline-block; list-style: none; cursor: po
   font-family: var(--sans); font-size: 0.88rem; padding: 0.55rem 1.1rem;
   border: 1px solid var(--accent); border-radius: 3px; color: var(--accent); }
 details.add-wrap > summary::-webkit-details-marker { display: none; }
-details.add-wrap > summary:hover { background: var(--accent); color: #fff; }
-details.add-wrap[open] > summary { background: var(--accent); color: #fff; margin-bottom: 1rem; }
+details.add-wrap > summary:hover { background: var(--accent); color: var(--on-accent); }
+details.add-wrap[open] > summary { background: var(--accent); color: var(--on-accent); margin-bottom: 1rem; }
 details.add-wrap form.add { margin-bottom: 0; }
 form.add label { display: block; font-family: var(--sans); font-size: 0.78rem;
   letter-spacing: 0.04em; text-transform: uppercase; color: var(--soft);
@@ -57,7 +61,7 @@ input[type=url], input[type=password], input[type=text] { flex: 1 1 18rem; min-w
   color: var(--ink); }
 button { font-family: var(--sans); font-size: 0.88rem; padding: 0.55rem 1.1rem;
   border: 1px solid var(--accent); border-radius: 3px; background: var(--accent);
-  color: #fff; cursor: pointer; }
+  color: var(--on-accent); cursor: pointer; }
 button.ghost { background: transparent; color: var(--accent); }
 button:hover { filter: brightness(1.08); }
 .hint { font-size: 0.85rem; color: var(--soft); margin: 0.75rem 0 0; }
@@ -129,7 +133,7 @@ function layout(title: string, body: string, script = ""): string {
 <meta name="description" content="A directory of blygs — sites publishing with the Blygger protocol.">
 <link rel="outline" type="text/x-opml" title="Blygs listed on blygger.com" href="/blygs.opml">
 <link rel="alternate" type="application/atom+xml" title="New on blygger.com" href="/listings.xml">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22><circle cx=%228%22 cy=%228%22 r=%227%22 fill=%22%23d95a1f%22/></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22><circle cx=%228%22 cy=%228%22 r=%227%22 fill=%22%231f5fc2%22/></svg>">
 <style>${STYLE}</style>
 </head>
 <body>
