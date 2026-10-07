@@ -1,6 +1,27 @@
 # Status — blygger-com
 
 ## Active
+- **Session 38 (2026-10-06, Opus) — the directory as a machine surface, and kept
+  true.** Deployed (migrations 0005–0007 applied remote; Worker version
+  `091a939c`), pushed. Tabbed page (Blygs / Legacy RSS) with the submit form
+  behind a button. `/blygs.opml` (§11-shaped OPML of listed blygs) and
+  `/listings.xml` (Atom of new listings), both ETag'd and CORS-open. **Hourly
+  health pass** (`src/health.ts`, cron `17 * * * *`): 4 listings per run under the
+  50-subrequest cap, warnings and flags rewritten on success. Tiers (Venkat's
+  ruling, recorded in `review.ts`): unreachable marked after 24 h, withdrawn from
+  OPML/Atom after 72 h; defects (site mismatch, plain HTTP, private host) marked
+  at once, withdrawn after 14 days; info (IP, IDN) admin-only. A listing that
+  moves http→https follows in place. Blogroll sightings → admin-only "seen in
+  blogrolls, not listed" invitation list. Protocol census (`blyg`, `level`,
+  `generator`) shown as `vN.N`. 57 tests. **Conformance deferred** to
+  [#1](https://github.com/blygger/blygger-com/issues/1) until blygger-spec#11
+  merges. Later the same session: **content duplicate test** (shared archive-index
+  item ids → 409; migration 0008; re-check notes, never delists), **re-checks take
+  renamed titles** unless `review.ts` blocks them, the Pioneering Spirit workers.dev
+  duplicate rejected, and a **blue theme** so the site stops reading as
+  blygger.org. 62 tests. Open: `blyg.jdbb.net` / `jd-blyg.exe.xyz` are one blyg
+  (Venkat to decide); form copy still has a "we/us" voice and two stale lines
+  (held-for-a-shared-name; footer "Listing is manual").
 - **An optional operator contact on submissions** (session 27, 2026-09-28, migration
   `0002_contact.sql`, **needs `--remote` apply on deploy**). Added for a gap that had
   already cost something: blygger-studio shipped a security fix to its public Webmention
