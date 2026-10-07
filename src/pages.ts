@@ -143,6 +143,7 @@ function layout(title: string, body: string, script = ""): string {
   <nav>
     <a href="https://blygger.org">blygger protocol ↗</a>
     <a href="https://blygger.org/start/">build a blyg ↗</a>
+    <a href="https://blyg.blygger.org/">official blyg ↗</a>
   </nav>
 </header>
 ${body}
