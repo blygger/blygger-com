@@ -25,6 +25,47 @@ export interface Validated {
   blogrollUrl?: string | null;
   /** What a blyg's manifest declares about itself (§6.1). Absent for feeds. */
   census?: Census;
+  /**
+   * The item ids in a blyg's archive index (§6.2), or null when it could not be
+   * read. Ids are minted by the publishing blyg, so two origins sharing one are
+   * the same store on two addresses — the duplicate test (session 38).
+   */
+  itemIds?: string[] | null;
+}
+
+const MAX_ITEM_IDS = 5000;
+
+/**
+ * Item ids from the archive index. The manifest's `items` key is the path
+ * (authoritative from 0.4, §16; `items/index.json` by default). Never throws:
+ * an unreadable index means no duplicate test, not a failed submission.
+ */
+async function indexItemIds(
+  manifest: Record<string, unknown>,
+  origin: string,
+  fetchFn: FetchLike,
+): Promise<string[] | null> {
+  try {
+    const path = typeof manifest["items"] === "string" && manifest["items"].trim() ? manifest["items"].trim() : "items/index.json";
+    const res = await fetchFn(new URL(path, origin).toString());
+    if (!res.ok) return null;
+    const doc = JSON.parse(await res.text()) as { items?: unknown };
+    if (!Array.isArray(doc.items)) return null;
+    const ids = new Set<string>();
+    for (const it of doc.items) {
+      const id = (it as { id?: unknown } | null)?.id;
+      if (typeof id === "string" && id.length > 0 && id.length <= 64) ids.add(id);
+      if (ids.size >= MAX_ITEM_IDS) break;
+    }
+    return [...ids];
+  } catch {
+    return null;
+  }
+}
+
+export interface ValidateOptions {
+  /** Read the archive index for the duplicate test. Off for blogroll sightings, to save a fetch. */
+  itemIds?: boolean;
 }
 
 /**
@@ -112,7 +153,11 @@ async function feedTitle(feedUrl: string, fetchFn: FetchLike = platformFetch): P
   }
 }
 
-export async function validateSubmission(raw: string, fetchFn?: FetchLike): Promise<Validated> {
+export async function validateSubmission(
+  raw: string,
+  fetchFn: FetchLike = platformFetch,
+  opts: ValidateOptions = {},
+): Promise<Validated> {
   let input: string;
   try {
     const u = new URL(raw.trim());
@@ -131,6 +176,7 @@ export async function validateSubmission(raw: string, fetchFn?: FetchLike): Prom
       homeUrl: r.origin,
       blogrollUrl: manifestBlogroll(r.manifest, r.origin),
       census: manifestCensus(r.manifest),
+      itemIds: opts.itemIds === false ? null : await indexItemIds(r.manifest, r.origin, fetchFn),
       // Surfaced, not adopted — decision #17's rule that a mirror must never
       // inherit another origin's identity. Worth recording when it happens.
       note: r.siteMismatch

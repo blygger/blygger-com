@@ -306,6 +306,7 @@ describe("every inline script parses", () => {
           protocol: "0.2",
           level: 2,
           generator: "x/1",
+          item_ids: null,
           review_reason: null,
           warnings: null,
           contact: "someone@a.example",
@@ -892,6 +893,86 @@ describe("protocol census (migration 0007)", () => {
     expect([row?.protocol, row?.level, row?.generator]).toEqual(["0.3", 2, "new/2.0"]);
     page = await (await get("/")).text();
     expect(page).toContain('<span class="ver" title="protocol 0.3 · level 2 · generator: new/2.0">v0.3</span>');
+    await env.DB.prepare(`DELETE FROM submissions`).run();
+  });
+});
+
+describe("duplicates by content (migration 0008)", () => {
+  it("a second address for the same blyg is refused at submission, naming the first", async () => {
+    await env.DB.prepare(`DELETE FROM submissions`).run();
+    const first = await postJson("/api/submit", { url: "https://canonical.fixture.test/" });
+    expect(first.status).toBe(200);
+    expect(first.json.message).toContain("Listed");
+
+    const second = await postJson("/api/submit", { url: "https://mirror.fixture.test/", contact: "op@fixture.test" });
+    expect(second.status).toBe(409);
+    expect(second.json.duplicate_of).toBe("https://canonical.fixture.test/");
+    expect(second.json.message).toContain("same blyg as https://canonical.fixture.test/");
+
+    const { results } = await env.DB.prepare(`SELECT origin, contact FROM submissions`).all<{ origin: string; contact: string | null }>();
+    expect(results.map((r) => r.origin)).toEqual(["https://canonical.fixture.test/"]);
+    // The refused submission's contact lands on the listing it duplicates, if that had none.
+    expect(results[0].contact).toBe("op@fixture.test");
+  });
+
+  it("a different blyg is not a duplicate", async () => {
+    const r = await postJson("/api/submit", { url: "https://other.fixture.test/" });
+    expect(r.status).toBe(200);
+  });
+
+  it("a rejected listing does not block, and re-submitting a rejected address says so", async () => {
+    await env.DB.prepare(`UPDATE submissions SET status = 'rejected' WHERE origin = 'https://canonical.fixture.test/'`).run();
+    const again = await postJson("/api/submit", { url: "https://canonical.fixture.test/" });
+    expect(again.json.message).toContain("taken out of the directory");
+    const mirror = await postJson("/api/submit", { url: "https://mirror.fixture.test/" });
+    expect(mirror.status).toBe(200);
+    await env.DB.prepare(`DELETE FROM submissions`).run();
+  });
+
+  it("the re-check notes an existing duplicate pair for the admin and delists neither", async () => {
+    const { insertSubmission, getById } = await import("../src/store.ts");
+    const { runHealthPass, timedFetch } = await import("../src/health.ts");
+    const mk = (host: string) => insertSubmission(env.DB, {
+      submittedUrl: `https://${host}/`, kind: "blyg", origin: `https://${host}/`, title: "Fixture Blyg",
+      homeUrl: `https://${host}/`, resolveNote: null, contact: null, reviewReason: null, warnings: [],
+    });
+    const a = await mk("canonical.fixture.test");
+    const b = await mk("mirror.fixture.test");
+    // timedFetch is the production fetch; the outbound fixture answers it.
+    await runHealthPass(env.DB, timedFetch, new Date("2026-10-06T00:00:00Z"));
+    await runHealthPass(env.DB, timedFetch, new Date("2026-10-06T01:00:00Z"));
+    const ra = await getById(env.DB, a);
+    const rb = await getById(env.DB, b);
+    expect([ra?.status, rb?.status]).toEqual(["approved", "approved"]);
+    expect(rb?.health_note).toContain("same items as https://canonical.fixture.test/ (2 shared)");
+    expect(JSON.parse(ra!.item_ids!)).toHaveLength(2);
+    await env.DB.prepare(`DELETE FROM submissions`).run();
+  });
+});
+
+describe("names follow the site (session 38)", () => {
+  it("the re-check takes a renamed title, and refuses a deceptive one", async () => {
+    const { insertSubmission, getById } = await import("../src/store.ts");
+    const { runHealthPass } = await import("../src/health.ts");
+    await env.DB.prepare(`DELETE FROM submissions`).run();
+    const id = await insertSubmission(env.DB, {
+      submittedUrl: "https://n.example/", kind: "blyg", origin: "https://n.example/", title: "Old Name",
+      homeUrl: "https://n.example/", resolveNote: null, contact: null, reviewReason: null, warnings: [],
+    });
+    const named = (title: string) => stubFetch({
+      "https://n.example/": { body: '<link rel="blyg" href="/blyg.json">' },
+      "https://n.example/blyg.json": { body: MANIFEST("https://n.example/", { title }), type: "application/json" },
+    });
+    await runHealthPass(env.DB, named("New Name") as any, new Date("2026-10-01T00:00:00Z"));
+    let row = await getById(env.DB, id);
+    expect(row?.title).toBe("New Name");
+    expect(row?.health_note).toContain('renamed from "Old Name"');
+    expect(await (await get("/")).text()).toContain("New Name");
+
+    await runHealthPass(env.DB, named("Evil\u202Eeman") as any, new Date("2026-10-02T00:00:00Z"));
+    row = await getById(env.DB, id);
+    expect(row?.title).toBe("New Name");
+    expect(row?.health_note).toContain("new title not taken");
     await env.DB.prepare(`DELETE FROM submissions`).run();
   });
 });

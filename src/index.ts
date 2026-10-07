@@ -15,7 +15,7 @@ import { etag } from "hono/etag";
 import { checkPassword, clearSessionCookie, issueSessionCookie, verifySession } from "./auth.ts";
 import { adminPage, blygsOpml, listingsAtom, loginPage, publicPage } from "./pages.ts";
 import { listUnlistedBlygs, runHealthPass, timedFetch } from "./health.ts";
-import { applyRecheck, getByOrigin, insertSubmission, listApproved, listForReview, listPending, setContactIfEmpty, setStatus, getById } from "./store.ts";
+import { applyRecheck, findDuplicate, getByOrigin, insertSubmission, listApproved, listForReview, listPending, setContactIfEmpty, setStatus, getById } from "./store.ts";
 import { reviewReason } from "./review.ts";
 import type { Env } from "./types.ts";
 import { validateSubmission } from "./validate.ts";
@@ -102,9 +102,31 @@ app.post("/api/submit", async (c) => {
         message:
           existing.status === "approved"
             ? "Already listed — thanks."
-            : "Already submitted; it's in the queue.",
+            : existing.status === "pending"
+              ? "Already submitted; it's in the queue."
+              : "This address was taken out of the directory. If that looks wrong, open an issue on github.com/blygger/blygger-com.",
       });
     }
+  }
+
+  // The same blyg at a second address — a workers.dev hostname beside a custom
+  // domain, or a host it moved from. Exact-origin dedupe cannot see it; shared
+  // item ids can, because ids are minted by the publishing blyg (§5.1). Refused
+  // and not stored: the existing listing is the blyg, and which address should
+  // represent it is the operator's call, made by asking, not by re-submitting.
+  const dup = await findDuplicate(c.env.DB, v.itemIds);
+  if (dup) {
+    if (contact) await setContactIfEmpty(c.env.DB, dup.id, contact);
+    return c.json(
+      {
+        message:
+          `This is the same blyg as ${dup.origin}, which is ` +
+          (dup.status === "approved" ? "already listed" : "already in the queue") +
+          ". If this address should replace it, open an issue on github.com/blygger/blygger-com.",
+        duplicate_of: dup.origin,
+      },
+      409,
+    );
   }
 
   const { block, warnings } = reviewReason({ submittedUrl: url, validated: v });
@@ -120,6 +142,7 @@ app.post("/api/submit", async (c) => {
     reviewReason: block,
     warnings,
     census: v.census,
+    itemIds: v.itemIds,
   });
 
   const what = v.kind === "blyg" ? "Resolved as a blyg" : "Resolved as a feed (not a blyg)";

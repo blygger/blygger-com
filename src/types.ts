@@ -38,6 +38,8 @@ export interface SubmissionRow {
   protocol: string | null;
   level: number | null;
   generator: string | null;
+  /** Migration 0008: JSON array of archive-index item ids. Admin-side only. */
+  item_ids: string | null;
 }
 
 /**

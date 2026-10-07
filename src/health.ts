@@ -20,10 +20,11 @@
 //
 // ── Budget ─────────────────────────────────────────────────────────────────
 // A Worker invocation may make a bounded number of subrequests (50 on the free
-// plan). Resolution is at most six fetches (decision #17), plus one for a feed
-// title and one for a blogroll, so a run checks LISTINGS_PER_RUN listings
-// (≤ 32 fetches) and SIGHTINGS_PER_RUN sightings (≤ 14), least recently
-// checked first. At an hourly cron that cycles ~33 listings about every 8 hours.
+// plan). Resolution is at most six fetches (decision #17); a blyg adds its
+// archive index and its blogroll, a feed adds its title — eight at most per
+// listing, so LISTINGS_PER_RUN listings cost ≤ 32. Sightings skip the index,
+// so SIGHTINGS_PER_RUN cost ≤ 14. Total ≤ 46, least recently checked first.
+// At an hourly cron that cycles ~33 listings about every 8 hours.
 
 import { XMLParser } from "fast-xml-parser";
 import { DEFECT_LABEL, DEFECTS, reviewReason, type FindingCode } from "./review.ts";
@@ -31,6 +32,7 @@ import { validateSubmission, type Census } from "./validate.ts";
 import type { FetchLike } from "./vendor/http.ts";
 import { IMPORTER_USER_AGENT } from "./vendor/http.ts";
 import type { SubmissionRow } from "./types.ts";
+import { findDuplicate } from "./store.ts";
 
 export const LISTINGS_PER_RUN = 4;
 export const SIGHTINGS_PER_RUN = 2;
@@ -206,6 +208,8 @@ export async function runHealthPass(db: D1Database, fetchFn: FetchLike, now = ne
     let warnings: string[] | null = null;
     let flags: FindingCode[] | null = null;
     let census: Census | null = null;
+    let title: string | null = null;
+    let itemIds: string[] | null = null;
     try {
       const v = await validateSubmission(recheckTarget(row), fetchFn);
       let current = row.origin;
@@ -241,7 +245,29 @@ export async function runHealthPass(db: D1Database, fetchFn: FetchLike, now = ne
         warnings = r.warnings;
         flags = r.codes;
         census = v.census ?? null;
-        if (r.block) note = `would now be held: ${r.block}`;
+        const notes: string[] = [];
+        if (r.block) notes.push(`would now be held: ${r.block}`);
+        // Names change (Venkat, session 38: "several blygs have had their names
+        // changed since they were submitted"). Taken from the manifest or feed
+        // as it is now — but only when the listing rules pass on it, since
+        // review.ts is what keeps control and direction-override characters
+        // out of a list of names. A title that would block keeps the old name.
+        if (v.title && v.title !== row.title) {
+          if (r.block) notes.push(`new title not taken: ${JSON.stringify(v.title)}`);
+          else {
+            title = v.title;
+            notes.push(`renamed from ${JSON.stringify(row.title ?? "")}`);
+          }
+        }
+        // The same store at another address (migration 0008). Noted for the
+        // admin, never acted on: which address should represent a blyg is a
+        // question for its operator, not for a cron job.
+        if (v.itemIds?.length) {
+          itemIds = v.itemIds;
+          const dup = await findDuplicate(db, v.itemIds, row.id);
+          if (dup) notes.push(`same items as ${dup.origin} (${dup.shared} shared)`);
+        }
+        if (notes.length) note = notes.join("; ");
         if (v.kind === "blyg" && v.blogrollUrl) {
           report.sightingsRecorded += await recordBlogroll(db, fetchFn, v.blogrollUrl, current!, nowIso);
         }
@@ -265,7 +291,9 @@ export async function runHealthPass(db: D1Database, fetchFn: FetchLike, now = ne
                                   ELSE NULL END,
            protocol        = CASE WHEN ?8 THEN ?9  ELSE protocol  END,
            level           = CASE WHEN ?8 THEN ?10 ELSE level     END,
-           generator       = CASE WHEN ?8 THEN ?11 ELSE generator END
+           generator       = CASE WHEN ?8 THEN ?11 ELSE generator END,
+           title           = COALESCE(?12, title),
+           item_ids        = COALESCE(?13, item_ids)
          WHERE id = ?7`,
       )
       .bind(
@@ -280,6 +308,8 @@ export async function runHealthPass(db: D1Database, fetchFn: FetchLike, now = ne
         census?.protocol ?? null,
         census?.level ?? null,
         census?.generator ?? null,
+        title,
+        itemIds ? JSON.stringify(itemIds) : null,
       )
       .run();
     report.checked.push({ id: row.id, ok, note });
@@ -331,7 +361,7 @@ async function resolveSightings(db: D1Database, fetchFn: FetchLike, nowIso: stri
     let kind: string = "failure";
     let origin: string | null = null;
     try {
-      const v = await validateSubmission(feed_url, fetchFn);
+      const v = await validateSubmission(feed_url, fetchFn, { itemIds: false });
       kind = v.kind;
       origin = v.origin;
     } catch {

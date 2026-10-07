@@ -95,6 +95,8 @@ export interface NewSubmission {
   warnings: string[];
   /** What a blyg's manifest declares (migration 0007); omitted for feeds. */
   census?: { protocol: string | null; level: number | null; generator: string | null };
+  /** Archive-index item ids (migration 0008); omitted or null when unread. */
+  itemIds?: string[] | null;
 }
 
 /**
@@ -112,11 +114,12 @@ export async function insertSubmission(db: D1Database, s: NewSubmission): Promis
     .prepare(
       `INSERT INTO submissions
          (id, submitted_url, kind, origin, title, home_url, resolve_note, status, submitted_at, contact, review_reason, warnings,
-          protocol, level, generator)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          protocol, level, generator, item_ids)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(id, s.submittedUrl, s.kind, s.origin, s.title, s.homeUrl, s.resolveNote, status, nowIso(), s.contact, s.reviewReason, JSON.stringify(s.warnings),
-      s.census?.protocol ?? null, s.census?.level ?? null, s.census?.generator ?? null)
+      s.census?.protocol ?? null, s.census?.level ?? null, s.census?.generator ?? null,
+      s.itemIds?.length ? JSON.stringify(s.itemIds) : null)
     .run();
   return id;
 }
@@ -144,4 +147,49 @@ export async function setStatus(
     .prepare(`UPDATE submissions SET status = ?, reviewed_at = ?, admin_note = COALESCE(?, admin_note) WHERE id = ?`)
     .bind(status, nowIso(), adminNote ?? null, id)
     .run();
+}
+
+export interface DuplicateHit {
+  id: string;
+  origin: string;
+  status: SubmissionRow["status"];
+  title: string | null;
+  shared: number;
+}
+
+/**
+ * A listing — approved or queued, never a rejected one — whose archive index
+ * shares an item id with `itemIds`: the same blyg at another address. Done in
+ * TypeScript over every row rather than with json_each, because the table is
+ * tens of rows and the rule is easier to read here than in SQL.
+ */
+export async function findDuplicate(
+  db: D1Database,
+  itemIds: string[] | null | undefined,
+  excludeId?: string,
+): Promise<DuplicateHit | null> {
+  if (!itemIds?.length) return null;
+  const mine = new Set(itemIds);
+  const { results } = await db
+    .prepare(
+      `SELECT id, origin, status, title, item_ids FROM submissions
+       WHERE status != 'rejected' AND item_ids IS NOT NULL AND origin IS NOT NULL`,
+    )
+    .all<{ id: string; origin: string; status: SubmissionRow["status"]; title: string | null; item_ids: string }>();
+  let best: DuplicateHit | null = null;
+  for (const r of results ?? []) {
+    if (r.id === excludeId) continue;
+    let theirs: unknown;
+    try {
+      theirs = JSON.parse(r.item_ids);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(theirs)) continue;
+    const shared = theirs.filter((x) => mine.has(x as string)).length;
+    if (shared && (!best || shared > best.shared)) {
+      best = { id: r.id, origin: r.origin, status: r.status, title: r.title, shared };
+    }
+  }
+  return best;
 }

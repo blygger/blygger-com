@@ -1,6 +1,7 @@
 import path from "node:path";
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-pool-workers";
 import { defineConfig } from "vitest/config";
+import { outbound } from "./test/outbound-fixtures.ts";
 
 export default defineConfig({
   plugins: [
@@ -9,6 +10,7 @@ export default defineConfig({
       return {
         wrangler: { configPath: "./wrangler.jsonc" },
         miniflare: {
+          outboundService: outbound,
           bindings: {
             TEST_MIGRATIONS: migrations,
             OWNER_PASSWORD: "test-password",
