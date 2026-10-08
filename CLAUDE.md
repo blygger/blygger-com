@@ -138,7 +138,7 @@ This Worker uses no Anthropic key. If one is ever added, create its own (service
 project's **local config**; it adds to the base and never replaces it.
 
 **Ritual config**
-- **Log:** `status.md` (dated entry, non-skippable). Devlog: none.
+- **Log:** `../blygger-spec/DEVLOG.md` (the one program log for all four repos; dated entry, non-skippable) plus a line in this repo's `status.md`.
 - **Startup extras (S5):** none
 - **Verification (W2):** request the Worker route and check the admin queue still loads.
 - **Wrap-up extras (after W5):** none
