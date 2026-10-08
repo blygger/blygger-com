@@ -127,3 +127,20 @@ npx wrangler d1 migrations apply blygger-com --remote   # when migrations change
 ## Status
 
 See [`status.md`](status.md). Live since 2026-09-16.
+
+## Anthropic keys (changed 2026-10-07)
+
+This Worker uses no Anthropic key. If one is ever added, create its own (service account + single-workspace key) per `Code/warnings-keys.md`; do not reuse another project's.
+
+## Session rituals
+
+**Base:** [`Code/devops/rituals.md`](../../devops/rituals.md) — v1.0. Startup is S1–S7, wrap-up is W0–W7 (IDs reserved). Everything below is this
+project's **local config**; it adds to the base and never replaces it.
+
+**Ritual config**
+- **Log:** `status.md` (dated entry, non-skippable). Devlog: none.
+- **Startup extras (S5):** none
+- **Verification (W2):** request the Worker route and check the admin queue still loads.
+- **Wrap-up extras (after W5):** none
+- **Deploy policy:** only if Venkat says so.
+- **Carry-overs (S6):** none
