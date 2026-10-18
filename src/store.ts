@@ -17,7 +17,7 @@ import { newId, nowIso } from "./util.ts";
 export async function listApproved(db: D1Database): Promise<PublicRow[]> {
   const { results } = await db
     .prepare(
-      `SELECT kind, title, home_url, origin, failing_since, flags, defect_since, protocol, level, generator,
+      `SELECT kind, title, home_url, origin, feed_url, failing_since, flags, defect_since, protocol, level, generator,
               COALESCE(reviewed_at, submitted_at) AS listed_at FROM submissions
        WHERE status = 'approved' AND home_url IS NOT NULL
        ORDER BY submitted_at DESC`,
@@ -97,6 +97,8 @@ export interface NewSubmission {
   census?: { protocol: string | null; level: number | null; generator: string | null };
   /** Archive-index item ids (migration 0008); omitted or null when unread. */
   itemIds?: string[] | null;
+  /** A blyg's feed from its manifest (migration 0009); omitted for feeds. */
+  feedUrl?: string | null;
 }
 
 /**
@@ -114,12 +116,12 @@ export async function insertSubmission(db: D1Database, s: NewSubmission): Promis
     .prepare(
       `INSERT INTO submissions
          (id, submitted_url, kind, origin, title, home_url, resolve_note, status, submitted_at, contact, review_reason, warnings,
-          protocol, level, generator, item_ids)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          protocol, level, generator, item_ids, feed_url)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(id, s.submittedUrl, s.kind, s.origin, s.title, s.homeUrl, s.resolveNote, status, nowIso(), s.contact, s.reviewReason, JSON.stringify(s.warnings),
       s.census?.protocol ?? null, s.census?.level ?? null, s.census?.generator ?? null,
-      s.itemIds?.length ? JSON.stringify(s.itemIds) : null)
+      s.itemIds?.length ? JSON.stringify(s.itemIds) : null, s.feedUrl ?? null)
     .run();
   return id;
 }

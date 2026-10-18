@@ -19,7 +19,7 @@ header() {
   printf '// VENDORED from blygger-studio/src/%s — do not edit here.\n// Re-sync with scripts/sync-vendor.sh. See self-host-plan.md §7.\n\n' "$1"
 }
 
-for f in importer/resolve.ts importer/feed.ts importer/http.ts; do
+for f in importer/resolve.ts importer/feed.ts importer/http.ts outbound-policy.ts; do
   out="$DEST/$(basename "$f")"
   header "$f" > "$out"
   cat "$SRC/$f" >> "$out"
@@ -35,4 +35,11 @@ sed -i '' 's#from "../util.ts"#from "./util.ts"#' "$DEST/feed.ts"
 # client's — blygger.com is not a blyg client and should not claim to be one.
 sed -i '' 's#from "../types.ts"#from "./util.ts"#' "$DEST/http.ts"
 sed -i '' 's#(+https://blygger.org)#(+https://blygger.com)#' "$DEST/http.ts"
+
+# http.ts guards every fetch with outbound-policy.ts (studio 0.28: no private or
+# loopback destinations unless the operator allows them), which the directory
+# wants too, since it fetches URLs strangers submit. Vendored beside it; its
+# Env type comes from the shim. Needs the ipaddr.js dependency.
+sed -i '' 's#from "../outbound-policy.ts"#from "./outbound-policy.ts"#' "$DEST/http.ts"
+sed -i '' "s#from './types.ts'#from './util.ts'#" "$DEST/outbound-policy.ts"
 echo "Done. Review with: git diff src/vendor/"

@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "fast-xml-parser": "5.10.1",
-    "hono": "4.12.30"
+    "hono": "4.12.30",
+    "ipaddr.js": "2.2.0"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "0.18.6",

@@ -496,14 +496,15 @@ ${rows
 }
 
 /**
- * The feed a subscriber should follow. Under 0.3 the feed path is
- * protocol-fixed (§4), so a blyg's is `{origin}feed.xml`; a legacy row's
- * origin already *is* its feed URL. At 0.4 the manifest's `feed` key becomes
- * authoritative (§16) and this has to come from a stored resolution instead.
+ * The feed a subscriber should follow. A legacy row's origin already *is* its
+ * feed URL. A blyg's is the manifest's `feed`, authoritative from 0.4 (§6.1)
+ * and stored at submission and on every re-check (migration 0009); a row not
+ * yet re-checked falls back to the default path, `{origin}feed.xml`.
  */
 export function feedUrlOf(r: PublicRow): string | null {
   if (!r.origin) return null;
   if (r.kind !== "blyg") return r.origin;
+  if (r.feed_url) return r.feed_url;
   try {
     return new URL("feed.xml", r.origin).toString();
   } catch {

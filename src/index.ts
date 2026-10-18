@@ -143,6 +143,7 @@ app.post("/api/submit", async (c) => {
     warnings,
     census: v.census,
     itemIds: v.itemIds,
+    feedUrl: v.feedUrl,
   });
 
   const what = v.kind === "blyg" ? "Resolved as a blyg" : "Resolved as a feed (not a blyg)";

@@ -157,6 +157,15 @@ describe("blygs.opml", () => {
     for (const id of [a, b, held]) await env.DB.prepare(`DELETE FROM submissions WHERE id = ?`).bind(id).run();
   });
 
+  it("hands out a templated blyg's own feed, not the default path (migration 0009, 0.4 §6.1)", async () => {
+    const r = await postJson("/api/submit", { url: "https://wp.fixture.example/blyg/" });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    const xml = await (await get("/blygs.opml")).text();
+    expect(xml).toContain('xmlUrl="https://wp.fixture.example/wp-json/soapbox-blyg/v1/feed" htmlUrl="https://wp.fixture.example/blyg/"');
+    expect(xml).not.toContain("https://wp.fixture.example/blyg/feed.xml");
+    await env.DB.prepare(`DELETE FROM submissions WHERE origin = 'https://wp.fixture.example/blyg/'`).run();
+  });
+
   it("is advertised from the page head", async () => {
     expect(await (await get("/")).text()).toContain('rel="outline" type="text/x-opml"');
   });
@@ -900,31 +909,31 @@ describe("protocol census (migration 0007)", () => {
 describe("duplicates by content (migration 0008)", () => {
   it("a second address for the same blyg is refused at submission, naming the first", async () => {
     await env.DB.prepare(`DELETE FROM submissions`).run();
-    const first = await postJson("/api/submit", { url: "https://canonical.fixture.test/" });
+    const first = await postJson("/api/submit", { url: "https://canonical.fixture.example/" });
     expect(first.status).toBe(200);
     expect(first.json.message).toContain("Listed");
 
-    const second = await postJson("/api/submit", { url: "https://mirror.fixture.test/", contact: "op@fixture.test" });
+    const second = await postJson("/api/submit", { url: "https://mirror.fixture.example/", contact: "op@fixture.example" });
     expect(second.status).toBe(409);
-    expect(second.json.duplicate_of).toBe("https://canonical.fixture.test/");
-    expect(second.json.message).toContain("same blyg as https://canonical.fixture.test/");
+    expect(second.json.duplicate_of).toBe("https://canonical.fixture.example/");
+    expect(second.json.message).toContain("same blyg as https://canonical.fixture.example/");
 
     const { results } = await env.DB.prepare(`SELECT origin, contact FROM submissions`).all<{ origin: string; contact: string | null }>();
-    expect(results.map((r) => r.origin)).toEqual(["https://canonical.fixture.test/"]);
+    expect(results.map((r) => r.origin)).toEqual(["https://canonical.fixture.example/"]);
     // The refused submission's contact lands on the listing it duplicates, if that had none.
-    expect(results[0].contact).toBe("op@fixture.test");
+    expect(results[0].contact).toBe("op@fixture.example");
   });
 
   it("a different blyg is not a duplicate", async () => {
-    const r = await postJson("/api/submit", { url: "https://other.fixture.test/" });
-    expect(r.status).toBe(200);
+    const r = await postJson("/api/submit", { url: "https://other.fixture.example/" });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
   });
 
   it("a rejected listing does not block, and re-submitting a rejected address says so", async () => {
-    await env.DB.prepare(`UPDATE submissions SET status = 'rejected' WHERE origin = 'https://canonical.fixture.test/'`).run();
-    const again = await postJson("/api/submit", { url: "https://canonical.fixture.test/" });
+    await env.DB.prepare(`UPDATE submissions SET status = 'rejected' WHERE origin = 'https://canonical.fixture.example/'`).run();
+    const again = await postJson("/api/submit", { url: "https://canonical.fixture.example/" });
     expect(again.json.message).toContain("taken out of the directory");
-    const mirror = await postJson("/api/submit", { url: "https://mirror.fixture.test/" });
+    const mirror = await postJson("/api/submit", { url: "https://mirror.fixture.example/" });
     expect(mirror.status).toBe(200);
     await env.DB.prepare(`DELETE FROM submissions`).run();
   });
@@ -936,15 +945,15 @@ describe("duplicates by content (migration 0008)", () => {
       submittedUrl: `https://${host}/`, kind: "blyg", origin: `https://${host}/`, title: "Fixture Blyg",
       homeUrl: `https://${host}/`, resolveNote: null, contact: null, reviewReason: null, warnings: [],
     });
-    const a = await mk("canonical.fixture.test");
-    const b = await mk("mirror.fixture.test");
+    const a = await mk("canonical.fixture.example");
+    const b = await mk("mirror.fixture.example");
     // timedFetch is the production fetch; the outbound fixture answers it.
     await runHealthPass(env.DB, timedFetch, new Date("2026-10-06T00:00:00Z"));
     await runHealthPass(env.DB, timedFetch, new Date("2026-10-06T01:00:00Z"));
     const ra = await getById(env.DB, a);
     const rb = await getById(env.DB, b);
     expect([ra?.status, rb?.status]).toEqual(["approved", "approved"]);
-    expect(rb?.health_note).toContain("same items as https://canonical.fixture.test/ (2 shared)");
+    expect(rb?.health_note).toContain("same items as https://canonical.fixture.example/ (2 shared)");
     expect(JSON.parse(ra!.item_ids!)).toHaveLength(2);
     await env.DB.prepare(`DELETE FROM submissions`).run();
   });

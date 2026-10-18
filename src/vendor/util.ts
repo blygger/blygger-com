@@ -32,3 +32,10 @@ export function escapeHtml(s: string): string {
  * should be able to tell those apart, and mail us about the right thing.
  */
 export const GENERATOR = "blygger-com-directory/0.1.0";
+
+/**
+ * The one binding the vendored outbound policy reads. The directory never sets
+ * it, so private and loopback destinations stay refused, as they should be for
+ * URLs a stranger submitted.
+ */
+export type Env = { ALLOW_PRIVATE_FETCH?: string };

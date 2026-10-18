@@ -23,6 +23,11 @@ export interface Validated {
    * submission ignores it.
    */
   blogrollUrl?: string | null;
+  /**
+   * A blyg's feed, absolute: the manifest's `feed` (authoritative from 0.4,
+   * §6.1), else the default `feed.xml`. Absent for feeds, whose origin is the feed.
+   */
+  feedUrl?: string | null;
   /** What a blyg's manifest declares about itself (§6.1). Absent for feeds. */
   census?: Census;
   /**
@@ -113,6 +118,18 @@ function manifestTitle(manifest: Record<string, unknown>): string | null {
 }
 
 /** The manifest's OPTIONAL `blogroll` key (§6.1), made absolute against the origin. */
+/** The feed a blyg's manifest names, resolved against its origin (§6.1); `feed.xml` when absent. */
+function manifestFeed(manifest: Record<string, unknown>, origin: string): string | null {
+  const f = manifest["feed"];
+  const path = typeof f === "string" && f.trim() ? f.trim() : "feed.xml";
+  try {
+    const u = new URL(path, origin);
+    return u.protocol === "https:" || u.protocol === "http:" ? u.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 function manifestBlogroll(manifest: Record<string, unknown>, origin: string): string | null {
   const b = manifest["blogroll"];
   if (typeof b !== "string" || !b.trim()) return null;
@@ -175,6 +192,7 @@ export async function validateSubmission(
       title: manifestTitle(r.manifest),
       homeUrl: r.origin,
       blogrollUrl: manifestBlogroll(r.manifest, r.origin),
+      feedUrl: manifestFeed(r.manifest, r.origin),
       census: manifestCensus(r.manifest),
       itemIds: opts.itemIds === false ? null : await indexItemIds(r.manifest, r.origin, fetchFn),
       // Surfaced, not adopted — decision #17's rule that a mirror must never

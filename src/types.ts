@@ -56,6 +56,8 @@ export interface PublicRow {
   home_url: string | null;
   /** The resolved origin (blyg) or feed URL (rss) — what the OPML export needs. */
   origin: string | null;
+  /** Migration 0009: a blyg's feed from its manifest; null for feeds and rows not yet re-checked. */
+  feed_url?: string | null;
   /** When it went public: review time if a human approved it, else submission. */
   listed_at: string;
   /** Start of the current run of failed health checks (migration 0005), or null. */

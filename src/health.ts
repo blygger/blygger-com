@@ -210,6 +210,7 @@ export async function runHealthPass(db: D1Database, fetchFn: FetchLike, now = ne
     let census: Census | null = null;
     let title: string | null = null;
     let itemIds: string[] | null = null;
+    let feedUrl: string | null = null;
     try {
       const v = await validateSubmission(recheckTarget(row), fetchFn);
       let current = row.origin;
@@ -245,6 +246,7 @@ export async function runHealthPass(db: D1Database, fetchFn: FetchLike, now = ne
         warnings = r.warnings;
         flags = r.codes;
         census = v.census ?? null;
+        feedUrl = v.feedUrl ?? null;
         const notes: string[] = [];
         if (r.block) notes.push(`would now be held: ${r.block}`);
         // Names change (Venkat, session 38: "several blygs have had their names
@@ -293,7 +295,8 @@ export async function runHealthPass(db: D1Database, fetchFn: FetchLike, now = ne
            level           = CASE WHEN ?8 THEN ?10 ELSE level     END,
            generator       = CASE WHEN ?8 THEN ?11 ELSE generator END,
            title           = COALESCE(?12, title),
-           item_ids        = COALESCE(?13, item_ids)
+           item_ids        = COALESCE(?13, item_ids),
+           feed_url        = COALESCE(?14, feed_url)
          WHERE id = ?7`,
       )
       .bind(
@@ -310,6 +313,7 @@ export async function runHealthPass(db: D1Database, fetchFn: FetchLike, now = ne
         census?.generator ?? null,
         title,
         itemIds ? JSON.stringify(itemIds) : null,
+        feedUrl,
       )
       .run();
     report.checked.push({ id: row.id, ok, note });
