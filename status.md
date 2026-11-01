@@ -1,6 +1,16 @@
 # Status — blygger-com
 
 ## Active
+- **Session 55 (2026-11-01, Opus) — moved blygs fold into one listing (decision
+  #88).** Migration 0010 (`moved_to`), applied remote; deployed (Worker version
+  `c32e0d0a`), pushed (`9e663c0`). The re-check reads a listing's old manifest without
+  following redirects: a 301/308 there is the old origin's own statement that the
+  blyg moved. New origin already listed → the old row records `moved_to` and leaves
+  the page, `blygs.opml` and `listings.xml`; new origin unlisted but naming the old
+  one in `moved_from` → the listing follows in place, like http→https; otherwise a
+  note for the admin. A non-permanent redirect unfolds it on the next check. One
+  extra subrequest, only for a listing that already resolves elsewhere. First case:
+  Florian Lohse (`florianlohse.com/blyg/` → `blyg.florianlohse.com`). 64 tests.
 - **Session 38 (2026-10-06, Opus) — the directory as a machine surface, and kept
   true.** Deployed (migrations 0005–0007 applied remote; Worker version
   `091a939c`), pushed. Tabbed page (Blygs / Legacy RSS) with the submit form
