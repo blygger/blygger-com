@@ -285,7 +285,9 @@ function listItems(rows: PublicRow[], mark: string, now: Date): string {
     .join("\n");
 }
 
-export function publicPage(rows: PublicRow[], now = new Date()): string {
+export function publicPage(allRows: PublicRow[], now = new Date()): string {
+  // A blyg that moved to another listed origin is shown once, at its new address (#88).
+  const rows = allRows.filter((r) => !r.moved_to);
   const blygs = rows.filter((r) => r.kind === "blyg");
   const legacy = rows.filter((r) => r.kind !== "blyg");
 
@@ -420,6 +422,9 @@ function healthNote(r: SubmissionRow, now: Date): string {
   const when = r.last_checked_at.slice(0, 16).replace("T", " ");
   const detail = r.health_note ? ` — ${escapeHtml(r.health_note)}` : "";
   const out = isWithdrawn(r, now) ? " · withdrawn from OPML and feed" : "";
+  if (r.moved_to) {
+    return `<div class="note">health: moved to ${escapeHtml(r.moved_to)} — folded into that listing, off the page and feeds (checked ${escapeHtml(when)})${detail}</div>`;
+  }
   if (r.failing_since) {
     return `<div class="note warn">health: failing since ${escapeHtml(r.failing_since.slice(0, 16).replace("T", " "))}${out}${detail}</div>`;
   }

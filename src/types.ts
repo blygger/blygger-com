@@ -34,6 +34,8 @@ export interface SubmissionRow {
   health_note: string | null;
   flags: string | null;
   defect_since: string | null;
+  /** Migration 0010: where this listing's blyg moved, when the move was folded into another listing (#88). */
+  moved_to?: string | null;
   /** Migration 0007: the manifest's self-description. Null on feeds. */
   protocol: string | null;
   level: number | null;
@@ -65,6 +67,8 @@ export interface PublicRow {
   /** Migration 0006: finding codes from the last successful re-check, and the defect run's start. */
   flags: string | null;
   defect_since: string | null;
+  /** Migration 0010: set when this blyg moved to another listed origin; such rows are not shown (#88). */
+  moved_to?: string | null;
   /** Migration 0007: the manifest's self-description. Null on feeds. */
   protocol: string | null;
   level: number | null;

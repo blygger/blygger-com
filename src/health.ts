@@ -76,6 +76,7 @@ export interface HealthFields {
   failing_since: string | null;
   defect_since: string | null;
   flags: string | null;
+  moved_to?: string | null;
 }
 
 /**
@@ -83,7 +84,7 @@ export interface HealthFields {
  * a successful check clears failing_since, and a clean one clears defect_since.
  */
 export function isWithdrawn(r: HealthFields, now: Date): boolean {
-  return isDormant(r.failing_since, now) || olderThan(r.defect_since, DEFECT_GRACE_MS, now);
+  return !!r.moved_to || isDormant(r.failing_since, now) || olderThan(r.defect_since, DEFECT_GRACE_MS, now);
 }
 
 export interface PublicMark {
@@ -131,6 +132,29 @@ export function parseFlags(json: string | null): FindingCode[] {
 function isTlsUpgrade(from: string | null, to: string | null): boolean {
   return !!from && !!to && from.startsWith("http://") && to === "https://" + from.slice("http://".length);
 }
+
+/**
+ * Where a URL redirects on its first hop, when that hop is permanent (301/308),
+ * read without following. Applied to a listing's old manifest it is the old
+ * origin's own statement that the blyg moved — only its controller can issue it
+ * (decision #88). Null for anything else, errors included.
+ */
+export type RedirectProbe = (url: string) => Promise<string | null>;
+
+export const permanentRedirect: RedirectProbe = async (url) => {
+  try {
+    const res = await fetch(url, {
+      redirect: "manual",
+      headers: { "User-Agent": IMPORTER_USER_AGENT },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (res.status !== 301 && res.status !== 308) return null;
+    const location = res.headers.get("location");
+    return location ? new URL(location, url).toString() : null;
+  } catch {
+    return null;
+  }
+};
 
 /** What to resolve to re-check a listing: the blyg's origin, or the legacy row's feed. */
 function recheckTarget(row: SubmissionRow): string {
@@ -190,7 +214,12 @@ export interface RunReport {
  * One scheduled pass. Never throws for a single listing's sake: every row is
  * checked inside its own try, and a row that throws is a failed check.
  */
-export async function runHealthPass(db: D1Database, fetchFn: FetchLike, now = new Date()): Promise<RunReport> {
+export async function runHealthPass(
+  db: D1Database,
+  fetchFn: FetchLike,
+  now = new Date(),
+  probe: RedirectProbe = permanentRedirect,
+): Promise<RunReport> {
   const nowIso = now.toISOString();
   const report: RunReport = { checked: [], sightingsRecorded: 0, sightingsResolved: 0 };
 
@@ -211,15 +240,25 @@ export async function runHealthPass(db: D1Database, fetchFn: FetchLike, now = ne
     let title: string | null = null;
     let itemIds: string[] | null = null;
     let feedUrl: string | null = null;
+    let movedTo: string | null = null;
     try {
       const v = await validateSubmission(recheckTarget(row), fetchFn);
       let current = row.origin;
-      if (v.kind !== "failure" && v.origin !== row.origin && isTlsUpgrade(row.origin, v.origin)) {
+      // Origin succession (decision #88): the old origin permanently redirects
+      // its manifest, and the listing now resolves elsewhere. One extra request,
+      // only for a listing that already resolves away from its origin.
+      const moved = v.kind === "blyg" && !!row.origin && !!v.origin && v.origin !== row.origin &&
+        !isTlsUpgrade(row.origin, v.origin) && !!(await probe(row.origin + "blyg.json"));
+      // The successor's consent: it names the old identity in `moved_from`.
+      const claimed = moved && !!v.movedFrom?.includes(row.origin!);
+      if (v.kind !== "failure" && v.origin !== row.origin && (isTlsUpgrade(row.origin, v.origin) || claimed)) {
         // The operator added TLS and now redirects to it. Same site, so the
         // listing follows — otherwise fixing "plain HTTP" would need a
         // re-submission, and the old row would sit there marked forever.
         // Skipped if the https origin is somehow listed separately.
         const taken = await db.prepare(`SELECT 1 FROM submissions WHERE origin = ?`).bind(v.origin).first();
+        // A move the successor confirms is the same site under a new address,
+        // so the listing follows it like a TLS upgrade.
         if (!taken) {
           await db
             .prepare(`UPDATE submissions SET origin = ?, home_url = ? WHERE id = ?`)
@@ -236,7 +275,25 @@ export async function runHealthPass(db: D1Database, fetchFn: FetchLike, now = ne
         // listing is a re-listing, so it is reported to the admin and the
         // operator re-submits; the listing itself is still alive.
         ok = true;
-        note = `now resolves as ${v.kind} at ${v.origin}; re-submit to update the listing`;
+        const listed = moved
+          ? await db
+              .prepare(`SELECT 1 FROM submissions WHERE origin = ? AND status = 'approved' AND id <> ? AND moved_to IS NULL`)
+              .bind(v.origin, row.id)
+              .first()
+          : null;
+        if (listed) {
+          // The blyg moved and its new address is listed already: one blyg,
+          // one listing. Both ends are the operator's own statements (the old
+          // origin's permanent redirect, the new origin's self-listing), so
+          // this is not a delisting on a third party's say-so. It undoes itself
+          // when the redirect stops.
+          movedTo = v.origin;
+          note = `moved to ${v.origin} (permanent redirect); folded into that listing`;
+        } else if (moved) {
+          note = `permanently redirects to ${v.origin}, which is not listed and does not name this origin in moved_from; re-submit to update the listing`;
+        } else {
+          note = `now resolves as ${v.kind} at ${v.origin}; re-submit to update the listing`;
+        }
       } else {
         ok = true;
         // Warnings describe the site as it is now, so a fixed site stops being
@@ -296,7 +353,8 @@ export async function runHealthPass(db: D1Database, fetchFn: FetchLike, now = ne
            generator       = CASE WHEN ?8 THEN ?11 ELSE generator END,
            title           = COALESCE(?12, title),
            item_ids        = COALESCE(?13, item_ids),
-           feed_url        = COALESCE(?14, feed_url)
+           feed_url        = COALESCE(?14, feed_url),
+           moved_to        = CASE WHEN ?2 THEN ?15 ELSE moved_to END
          WHERE id = ?7`,
       )
       .bind(
@@ -314,6 +372,7 @@ export async function runHealthPass(db: D1Database, fetchFn: FetchLike, now = ne
         title,
         itemIds ? JSON.stringify(itemIds) : null,
         feedUrl,
+        movedTo,
       )
       .run();
     report.checked.push({ id: row.id, ok, note });

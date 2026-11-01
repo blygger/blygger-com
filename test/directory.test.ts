@@ -782,6 +782,66 @@ describe("the health pass", () => {
     await env.DB.prepare(`DELETE FROM sightings`).run();
   });
 
+  it("folds a moved blyg into its new listing, follows a confirmed move, and only notes the rest (#88)", async () => {
+    const { runHealthPass } = await import("../src/health.ts");
+    const { insertSubmission, getById } = await import("../src/store.ts");
+    await env.DB.prepare(`DELETE FROM submissions`).run();
+    const OLD = "https://old.example/blyg/", NEW = "https://blyg.new.example/";
+    const listing = (origin: string, title: string) => insertSubmission(env.DB, {
+      submittedUrl: origin, kind: "blyg", origin, title, homeUrl: origin,
+      resolveNote: null, contact: null, reviewReason: null, warnings: [],
+    });
+    // The old manifest redirects to the new one: the resolver lands at NEW.
+    const moving = (extra: Record<string, unknown> = {}) => {
+      const routes = stubFetch({ [NEW + "blyg.json"]: { body: MANIFEST(NEW, { title: "Moved", ...extra }), type: "application/json" } });
+      return (async (url: string) => routes(url === OLD + "blyg.json" ? NEW + "blyg.json" : url)) as any;
+    };
+    const permanent = async (url: string) => (url === OLD + "blyg.json" ? NEW + "blyg.json" : null);
+    const temporary = async () => null;
+
+    // 1. New origin already listed: the old row folds into it.
+    const oldId = await listing(OLD, "Old address");
+    const newId = await listing(NEW, "Moved");
+    await runHealthPass(env.DB, moving(), new Date("2026-11-01T00:00:00Z"), permanent);
+    let old = await getById(env.DB, oldId);
+    expect(old?.moved_to).toBe(NEW);
+    expect(old?.health_note).toContain("folded into that listing");
+    expect((await getById(env.DB, newId))?.moved_to).toBeNull();
+    const page = await (await get("/")).text();
+    expect(page).not.toContain("old.example");
+    expect(page).toContain("blyg.new.example");
+    expect(await (await get("/blygs.opml")).text()).not.toContain("old.example");
+    expect(await (await get("/listings.xml")).text()).not.toContain("old.example");
+
+    // A redirect that is not permanent unfolds it again.
+    await env.DB.prepare(`UPDATE submissions SET last_checked_at = NULL WHERE id = ?`).bind(oldId).run();
+    await env.DB.prepare(`UPDATE submissions SET last_checked_at = '2026-12-01T00:00:00Z' WHERE id = ?`).bind(newId).run();
+    await runHealthPass(env.DB, moving(), new Date("2026-11-02T00:00:00Z"), temporary);
+    old = await getById(env.DB, oldId);
+    expect(old?.moved_to).toBeNull();
+    expect(old?.health_note).toContain("re-submit");
+
+    // 2. New origin not listed, but it names the old one in moved_from: the listing follows.
+    await env.DB.prepare(`DELETE FROM submissions`).run();
+    const solo = await listing(OLD, "Old address");
+    await runHealthPass(env.DB, moving({ moved_from: [OLD] }), new Date("2026-11-03T00:00:00Z"), permanent);
+    const followed = await getById(env.DB, solo);
+    expect(followed?.origin).toBe(NEW);
+    expect(followed?.moved_to).toBeNull();
+
+    // 3. Not listed and no moved_from: noted for the admin, nothing changes.
+    await env.DB.prepare(`DELETE FROM submissions`).run();
+    const quiet = await listing(OLD, "Old address");
+    await runHealthPass(env.DB, moving(), new Date("2026-11-04T00:00:00Z"), permanent);
+    const noted = await getById(env.DB, quiet);
+    expect(noted?.origin).toBe(OLD);
+    expect(noted?.moved_to).toBeNull();
+    expect(noted?.health_note).toContain("does not name this origin in moved_from");
+
+    await env.DB.prepare(`DELETE FROM submissions`).run();
+    await env.DB.prepare(`DELETE FROM sightings`).run();
+  });
+
   it("parseBlogroll skips non-http entries and walks folders", async () => {
     const { parseBlogroll } = await import("../src/health.ts");
     const got = parseBlogroll(`<opml version="2.0"><body>

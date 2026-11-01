@@ -36,6 +36,11 @@ export interface Validated {
    * the same store on two addresses — the duplicate test (session 38).
    */
   itemIds?: string[] | null;
+  /**
+   * The manifest's OPTIONAL `moved_from` (decision #88, spec §16.13): former
+   * identities this blyg declares as its own. Only the re-check reads it.
+   */
+  movedFrom?: string[];
 }
 
 const MAX_ITEM_IDS = 5000;
@@ -194,6 +199,9 @@ export async function validateSubmission(
       blogrollUrl: manifestBlogroll(r.manifest, r.origin),
       feedUrl: manifestFeed(r.manifest, r.origin),
       census: manifestCensus(r.manifest),
+      movedFrom: Array.isArray(r.manifest["moved_from"])
+        ? (r.manifest["moved_from"] as unknown[]).filter((x): x is string => typeof x === "string")
+        : [],
       itemIds: opts.itemIds === false ? null : await indexItemIds(r.manifest, r.origin, fetchFn),
       // Surfaced, not adopted — decision #17's rule that a mirror must never
       // inherit another origin's identity. Worth recording when it happens.
