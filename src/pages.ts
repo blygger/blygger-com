@@ -9,6 +9,7 @@ import { escapeHtml } from "./util.ts";
 import { isWithdrawn, parseFlags, publicMarks, type UnlistedBlyg } from "./health.ts";
 import { DEFECTS } from "./review.ts";
 import { CURRENT_PROTOCOL, protocolBehind } from "./validate.ts";
+import { activityOf, HALF_LIFE_DAYS, POSTS_COUNTED, type Activity } from "./activity.ts";
 
 const STYLE = `
 :root {
@@ -108,6 +109,18 @@ ul.blygs .host { font-family: var(--sans); font-size: 0.8rem; color: var(--soft)
   text-transform: uppercase; padding: 0.1rem 0.4rem; border-radius: 2px;
   border: 1px solid var(--rule); color: var(--soft); }
 .mark.blyg { color: var(--accent); border-color: var(--accent); }
+/* Activity (session 61): shape and colour both carry the level, so it reads without colour. */
+.act { font-family: var(--sans); font-size: 1.05rem; line-height: 1; cursor: help; width: 1em;
+  display: inline-block; text-align: center; }
+.act.high { color: #2a7d4f; } .act.medium { color: #a8661a; } .act.low { color: var(--soft); }
+.act.none { color: var(--soft); }
+@media (prefers-color-scheme: dark) { .act.high { color: #5fc28a; } .act.medium { color: #e0a85a; } }
+nav.sort { font-family: var(--sans); font-size: 0.8rem; color: var(--soft); margin: 1rem 0 0.25rem; }
+nav.sort a, nav.sort strong { margin-left: 0.6rem; }
+nav.sort a { color: var(--soft); text-decoration: none; }
+nav.sort a:hover { color: var(--accent); }
+nav.sort strong { color: var(--ink); font-weight: 600; }
+.legend .act { cursor: default; }
 .empty { color: var(--soft); font-style: italic; }
 footer { margin-top: 3.5rem; border-top: 1px solid var(--rule); padding-top: 1.1rem;
   font-family: var(--sans); font-size: 0.78rem; color: var(--soft); }
@@ -239,6 +252,10 @@ const TABS_SCRIPT = `
   root.classList.add('tabbed');
   root.querySelector('[role=tablist]').hidden = false;
   show(location.hash === '#legacy' ? 'legacy' : 'blygs');
+  // A sort link keeps the open tab: the order applies to both lists.
+  Array.prototype.forEach.call(root.querySelectorAll('nav.sort a'), function (a) {
+    a.addEventListener('click', function () { a.hash = location.hash; });
+  });
   tabs.forEach(function (t, i) {
     t.addEventListener('click', function () {
       show(t.dataset.tab);
@@ -270,6 +287,57 @@ function versionMark(r: PublicRow): string {
   return `<span class="ver${behind ? " behind" : ""}" title="${escapeHtml(bits.join(" · "))}">v${escapeHtml(r.protocol)}</span>`;
 }
 
+export type SortOrder = "activity" | "newest" | "oldest";
+export const SORT_ORDERS: { id: SortOrder; label: string; title: string }[] = [
+  { id: "activity", label: "Activity", title: "most active first: recent and frequent posts" },
+  { id: "newest", label: "Newest", title: "most recently listed first" },
+  { id: "oldest", label: "Oldest", title: "first listed first" },
+];
+export const sortOrder = (q: string | null | undefined): SortOrder =>
+  q === "newest" || q === "oldest" ? q : "activity";
+
+const ACT_SYMBOL = { high: "●", medium: "◐", low: "○" } as const;
+
+function daysAgo(iso: string, now: Date): string {
+  const d = Math.floor((now.getTime() - Date.parse(iso)) / 86_400_000);
+  return d <= 0 ? "today" : d === 1 ? "yesterday" : `${d} days ago`;
+}
+
+/** The activity mark: a symbol whose shape and colour both say the level, explained in its title. */
+function activityMark(a: Activity, now: Date): string {
+  if (!a.level || !a.last) {
+    return `<span class="act none" role="img" aria-label="activity not measured yet" title="Activity not measured yet: it is read at the next re-check">·</span>`;
+  }
+  const title = `Activity ${a.level}: last post ${daysAgo(a.last, now)}; ` +
+    `${a.events} recent post${a.events === 1 ? "" : "s"} counted (posts within an hour count once)`;
+  return `<span class="act ${a.level}" role="img" aria-label="activity ${a.level}" title="${escapeHtml(title)}">${ACT_SYMBOL[a.level]}</span>`;
+}
+
+/**
+ * The order the page lists in. Activity: highest score first, unmeasured
+ * listings last, newest-listed breaking ties. Newest and oldest: by the date
+ * the listing went public.
+ */
+function sortRows(rows: PublicRow[], order: SortOrder, now: Date): PublicRow[] {
+  const byListed = (a: PublicRow, b: PublicRow) => (a.listed_at < b.listed_at ? 1 : a.listed_at > b.listed_at ? -1 : 0);
+  if (order === "newest") return rows.slice().sort(byListed);
+  if (order === "oldest") return rows.slice().sort((a, b) => byListed(b, a));
+  const score = new Map(rows.map((r) => {
+    const a = activityOf(r.recent_posts, now);
+    return [r, a.level ? a.score : -1] as const;
+  }));
+  return rows.slice().sort((a, b) => score.get(b)! - score.get(a)! || byListed(a, b));
+}
+
+function sortNav(order: SortOrder): string {
+  const links = SORT_ORDERS.map((o) =>
+    o.id === order
+      ? `<strong aria-current="true" title="${escapeHtml(o.title)}">${o.label}</strong>`
+      : `<a href="${o.id === "activity" ? "/" : `/?sort=${o.id}`}" title="${escapeHtml(o.title)}">${o.label}</a>`,
+  ).join("");
+  return `<nav class="sort" aria-label="Sort the directory">Sort:${links}</nav>`;
+}
+
 function listItems(rows: PublicRow[], mark: string, now: Date): string {
   return rows
     .map((r) => {
@@ -279,15 +347,15 @@ function listItems(rows: PublicRow[], mark: string, now: Date): string {
       const health = publicMarks(r, now)
         .map((m) => `<span class="health" title="${escapeHtml(m.title)}">${escapeHtml(m.label)}</span>`)
         .join("");
-      return `  <li>${mark}<a class="name" href="${escapeHtml(home)}">${escapeHtml(name)}</a>` +
+      return `  <li>${activityMark(activityOf(r.recent_posts, now), now)}${mark}<a class="name" href="${escapeHtml(home)}">${escapeHtml(name)}</a>` +
         `<span class="host">${escapeHtml(hostOf(home))}</span>${versionMark(r)}${health}</li>`;
     })
     .join("\n");
 }
 
-export function publicPage(allRows: PublicRow[], now = new Date()): string {
+export function publicPage(allRows: PublicRow[], now = new Date(), order: SortOrder = "activity"): string {
   // A blyg that moved to another listed origin is shown once, at its new address (#88).
-  const rows = allRows.filter((r) => !r.moved_to);
+  const rows = sortRows(allRows.filter((r) => !r.moved_to), order, now);
   const blygs = rows.filter((r) => r.kind === "blyg");
   const legacy = rows.filter((r) => r.kind !== "blyg");
 
@@ -342,6 +410,10 @@ and a few plain feeds worth reading. Links go to the site itself, not to its fee
 </details>
 
 <section id="dir">
+${sortNav(order)}
+<p class="tabhint legend">Activity: <span class="act high" aria-hidden="true">●</span> high
+  <span class="act medium" aria-hidden="true">◐</span> medium <span class="act low" aria-hidden="true">○</span> low —
+  from the last ${POSTS_COUNTED} posts, each counting half as much for every ${HALF_LIFE_DAYS} days of age.</p>
 <div role="tablist" aria-label="Directory" hidden>
   <button type="button" role="tab" id="tab-blygs" data-tab="blygs" aria-controls="panel-blygs">Blygs<span class="count">${blygs.length}</span></button>
   <button type="button" role="tab" id="tab-legacy" data-tab="legacy" aria-controls="panel-legacy">Legacy RSS<span class="count">${legacy.length}</span></button>

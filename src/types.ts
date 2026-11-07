@@ -42,6 +42,8 @@ export interface SubmissionRow {
   generator: string | null;
   /** Migration 0008: JSON array of archive-index item ids. Admin-side only. */
   item_ids: string | null;
+  /** Migration 0011: JSON array of recent post times, newest first (src/activity.ts). */
+  recent_posts?: string | null;
 }
 
 /**
@@ -73,4 +75,6 @@ export interface PublicRow {
   protocol: string | null;
   level: number | null;
   generator: string | null;
+  /** Migration 0011: recent post times as JSON, for the activity mark and default order. */
+  recent_posts?: string | null;
 }

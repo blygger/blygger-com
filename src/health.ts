@@ -33,6 +33,7 @@ import type { FetchLike } from "./vendor/http.ts";
 import { IMPORTER_USER_AGENT } from "./vendor/http.ts";
 import type { SubmissionRow } from "./types.ts";
 import { findDuplicate } from "./store.ts";
+import { postTimesColumn } from "./activity.ts";
 
 export const LISTINGS_PER_RUN = 4;
 export const SIGHTINGS_PER_RUN = 2;
@@ -241,6 +242,7 @@ export async function runHealthPass(
     let itemIds: string[] | null = null;
     let feedUrl: string | null = null;
     let movedTo: string | null = null;
+    let recentPosts: string | null = null;
     try {
       const v = await validateSubmission(recheckTarget(row), fetchFn);
       let current = row.origin;
@@ -304,6 +306,7 @@ export async function runHealthPass(
         flags = r.codes;
         census = v.census ?? null;
         feedUrl = v.feedUrl ?? null;
+        recentPosts = postTimesColumn(v.recentPosts ?? []);
         const notes: string[] = [];
         if (r.block) notes.push(`would now be held: ${r.block}`);
         // Names change (Venkat, session 38: "several blygs have had their names
@@ -354,7 +357,8 @@ export async function runHealthPass(
            title           = COALESCE(?12, title),
            item_ids        = COALESCE(?13, item_ids),
            feed_url        = COALESCE(?14, feed_url),
-           moved_to        = CASE WHEN ?2 THEN ?15 ELSE moved_to END
+           moved_to        = CASE WHEN ?2 THEN ?15 ELSE moved_to END,
+           recent_posts    = COALESCE(?16, recent_posts)
          WHERE id = ?7`,
       )
       .bind(
@@ -373,6 +377,7 @@ export async function runHealthPass(
         itemIds ? JSON.stringify(itemIds) : null,
         feedUrl,
         movedTo,
+        recentPosts,
       )
       .run();
     report.checked.push({ id: row.id, ok, note });

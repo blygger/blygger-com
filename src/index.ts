@@ -13,7 +13,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { etag } from "hono/etag";
 import { checkPassword, clearSessionCookie, issueSessionCookie, verifySession } from "./auth.ts";
-import { adminPage, blygsOpml, listingsAtom, loginPage, publicPage } from "./pages.ts";
+import { adminPage, blygsOpml, listingsAtom, loginPage, publicPage, sortOrder } from "./pages.ts";
 import { listUnlistedBlygs, runHealthPass, timedFetch } from "./health.ts";
 import { applyRecheck, findDuplicate, getByOrigin, insertSubmission, listApproved, listForReview, listPending, setContactIfEmpty, setStatus, getById } from "./store.ts";
 import { reviewReason } from "./review.ts";
@@ -28,7 +28,7 @@ const PUBLIC_CACHE = "public, max-age=60";
 
 app.get("/", async (c) => {
   const rows = await listApproved(c.env.DB);
-  return c.html(publicPage(rows), 200, { "cache-control": PUBLIC_CACHE });
+  return c.html(publicPage(rows, new Date(), sortOrder(c.req.query("sort"))), 200, { "cache-control": PUBLIC_CACHE });
 });
 
 // The blygs as OPML. Same query and cache lifetime as the page, so it can never
@@ -144,6 +144,7 @@ app.post("/api/submit", async (c) => {
     census: v.census,
     itemIds: v.itemIds,
     feedUrl: v.feedUrl,
+    recentPosts: v.recentPosts,
   });
 
   const what = v.kind === "blyg" ? "Resolved as a blyg" : "Resolved as a feed (not a blyg)";

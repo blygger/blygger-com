@@ -53,3 +53,31 @@ export function channelTitle(xml: string): string | null {
   const raw = textOf(root?.rss?.channel?.title) ?? textOf(root?.feed?.title);
   return raw ? raw.slice(0, 200) : null;
 }
+
+/**
+ * The publication dates of a feed's items, as ISO strings (session 61, for the
+ * activity level): RSS `<item><pubDate>`, Atom `<entry>` `published`, else
+ * `updated`. Unparseable dates are skipped; anything that is not a well-formed
+ * feed gives none. Same tolerance as `channelTitle`: a missing date costs an
+ * unmeasured activity mark, nothing more.
+ */
+export function itemDates(xml: string): string[] {
+  if (XMLValidator.validate(xml) !== true) return [];
+  let parsed: unknown;
+  try {
+    parsed = new XMLParser({ ignoreAttributes: false }).parse(xml);
+  } catch {
+    return [];
+  }
+  const root = parsed as Record<string, any> | null;
+  const list = (v: unknown): Record<string, unknown>[] =>
+    Array.isArray(v) ? v : v && typeof v === "object" ? [v as Record<string, unknown>] : [];
+  const rss = list(root?.rss?.channel?.item).map((i) => textOf(i["pubDate"]));
+  const atom = list(root?.feed?.entry).map((e) => textOf(e["published"]) ?? textOf(e["updated"]));
+  const out: string[] = [];
+  for (const raw of [...rss, ...atom]) {
+    const t = raw ? Date.parse(raw) : NaN;
+    if (Number.isFinite(t)) out.push(new Date(t).toISOString());
+  }
+  return out;
+}

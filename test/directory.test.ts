@@ -1045,3 +1045,106 @@ describe("names follow the site (session 38)", () => {
     await env.DB.prepare(`DELETE FROM submissions`).run();
   });
 });
+
+describe("activity level (session 61, src/activity.ts)", () => {
+  const NOW = new Date("2026-11-07T12:00:00Z");
+  const ago = (days: number, hours = 0) => new Date(NOW.getTime() - (days * 24 + hours) * 3_600_000).toISOString();
+  const row = (title: string, listed: string, posts: string[] | null) => ({
+    kind: "blyg" as const, title, home_url: `https://${title.toLowerCase()}.example/`, origin: `https://${title.toLowerCase()}.example/`,
+    listed_at: listed, failing_since: null, flags: null, defect_since: null, protocol: null, level: null, generator: null,
+    recent_posts: posts ? JSON.stringify(posts) : null,
+  });
+
+  it("scores a weekly poster high, a monthly one medium, a quiet one low, and none as unmeasured", async () => {
+    const { activityOf } = await import("../src/activity.ts");
+    const weekly = Array.from({ length: 10 }, (_, k) => ago(7 * k));
+    const monthly = Array.from({ length: 10 }, (_, k) => ago(30 * k));
+    expect(activityOf(JSON.stringify(weekly), NOW).level).toBe("high");
+    expect(activityOf(JSON.stringify(monthly), NOW).level).toBe("medium");
+    expect(activityOf(JSON.stringify([ago(120)]), NOW).level).toBe("low");
+    expect(activityOf(null, NOW).level).toBeNull();
+    expect(activityOf("not json", NOW).level).toBeNull();
+  });
+
+  it("counts only the last ten posts, and a post halves in weight every thirty days", async () => {
+    const { activityOf } = await import("../src/activity.ts");
+    const many = Array.from({ length: 30 }, (_, k) => ago(2 * k));
+    expect(activityOf(JSON.stringify(many), NOW).events).toBe(10);
+    expect(activityOf(JSON.stringify([ago(30)]), NOW).score).toBeCloseTo(0.5, 6);
+  });
+
+  it("counts a burst of posts within an hour once, and ignores future dates", async () => {
+    const { activityOf } = await import("../src/activity.ts");
+    // Twelve fragments in one minute: one publishing act.
+    const burst = Array.from({ length: 12 }, (_, k) => new Date(NOW.getTime() - k * 5_000).toISOString());
+    const a = activityOf(JSON.stringify(burst), NOW);
+    expect(a.events).toBe(1);
+    expect(a.level).toBe("medium");
+    const future = activityOf(JSON.stringify([new Date(NOW.getTime() + 30 * 86_400_000).toISOString()]), NOW);
+    expect(future.level).toBeNull();
+  });
+
+  it("orders by activity by default, with unmeasured listings last; newest and oldest go by listing date", async () => {
+    const { publicPage } = await import("../src/pages.ts");
+    const rows = [
+      row("Quiet", "2026-09-01T00:00:00Z", [ago(200)]),
+      row("Busy", "2026-10-01T00:00:00Z", Array.from({ length: 10 }, (_, k) => ago(3 * k))),
+      row("Unknown", "2026-11-01T00:00:00Z", null),
+      row("Steady", "2026-08-01T00:00:00Z", Array.from({ length: 10 }, (_, k) => ago(30 * k))),
+    ];
+    const order = (html: string) => ["Quiet", "Busy", "Unknown", "Steady"].sort((a, b) => html.indexOf(`>${a}<`) - html.indexOf(`>${b}<`));
+    expect(order(publicPage(rows, NOW))).toEqual(["Busy", "Steady", "Quiet", "Unknown"]);
+    expect(order(publicPage(rows, NOW, "newest"))).toEqual(["Unknown", "Busy", "Quiet", "Steady"]);
+    expect(order(publicPage(rows, NOW, "oldest"))).toEqual(["Steady", "Quiet", "Busy", "Unknown"]);
+  });
+
+  it("marks each listing with its level in shape, colour and words", async () => {
+    const { publicPage } = await import("../src/pages.ts");
+    const html = publicPage([row("Busy", "2026-10-01T00:00:00Z", Array.from({ length: 10 }, (_, k) => ago(3 * k))), row("Unknown", "2026-11-01T00:00:00Z", null)], NOW);
+    expect(html).toContain('class="act high" role="img" aria-label="activity high"');
+    expect(html).toContain('class="act none" role="img" aria-label="activity not measured yet"');
+  });
+
+  it("the sort control links the other orders and marks the current one", async () => {
+    const res = await get("/?sort=oldest");
+    const html = await res.text();
+    expect(html).toContain('<strong aria-current="true"');
+    expect(html).toContain('href="/"');
+    expect(html).toContain('href="/?sort=newest"');
+    expect(html).not.toContain('href="/?sort=oldest"');
+    // An unknown value falls back to the default rather than failing.
+    expect(res.status).toBe(200);
+    expect(await (await get("/?sort=bogus")).text()).toContain('href="/?sort=oldest"');
+  });
+
+  it("reads post times from a blyg's archive index and a feed's items", async () => {
+    const blyg = await validateSubmission(
+      "https://example.com/blyg/",
+      stubFetch({
+        "https://example.com/blyg/blyg.json": {
+          body: JSON.stringify({ blyg: "0.4", site: "https://example.com/blyg/", title: "Example Blyg" }),
+          type: "application/json",
+        },
+        "https://example.com/blyg/items/index.json": {
+          body: JSON.stringify({ items: [
+            { id: "a1", kind: "fragment", created: "2026-11-01T00:00:00Z", updated: "2026-11-02T00:00:00Z", version: 2 },
+            { id: "b2", kind: "thread", created: "2026-10-01T00:00:00Z", updated: "2026-10-01T00:00:00Z", version: 1 },
+          ] }),
+          type: "application/json",
+        },
+      }),
+    );
+    expect(blyg.recentPosts).toEqual(["2026-11-01T00:00:00Z", "2026-10-01T00:00:00Z"]);
+    const feed = await validateSubmission(
+      "https://ac.example/feed.xml",
+      stubFetch({ "https://ac.example/feed.xml": {
+        body: `<?xml version="1.0"?><rss version="2.0"><channel><title>AC</title>
+          <item><guid>1</guid><pubDate>Fri, 06 Nov 2026 10:00:00 GMT</pubDate></item>
+          <item><guid>2</guid><pubDate>not a date</pubDate></item>
+        </channel></rss>`,
+        type: "application/rss+xml",
+      } }),
+    );
+    expect(feed.recentPosts).toEqual(["2026-11-06T10:00:00.000Z"]);
+  });
+});

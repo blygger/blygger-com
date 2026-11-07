@@ -9,7 +9,7 @@
 
 import { resolve } from "./vendor/resolve.ts";
 import { platformFetch, type FetchLike } from "./vendor/http.ts";
-import { channelTitle } from "./feed-title.ts";
+import { channelTitle, itemDates } from "./feed-title.ts";
 
 export interface Validated {
   kind: "blyg" | "rss" | "failure";
@@ -41,20 +41,26 @@ export interface Validated {
    * identities this blyg declares as its own. Only the re-check reads it.
    */
   movedFrom?: string[];
+  /**
+   * Recent post times, ISO, any order (session 61, src/activity.ts): a blyg's
+   * archive-index `created` times, or a feed's item dates. Null when unread.
+   */
+  recentPosts?: string[] | null;
 }
 
 const MAX_ITEM_IDS = 5000;
 
 /**
- * Item ids from the archive index. The manifest's `items` key is the path
- * (authoritative from 0.4, §16; `items/index.json` by default). Never throws:
- * an unreadable index means no duplicate test, not a failed submission.
+ * Item ids and creation times from the archive index. The manifest's `items`
+ * key is the path (authoritative from 0.4, §16; `items/index.json` by
+ * default). Never throws: an unreadable index means no duplicate test and no
+ * activity level, not a failed submission.
  */
-async function indexItemIds(
+async function readIndex(
   manifest: Record<string, unknown>,
   origin: string,
   fetchFn: FetchLike,
-): Promise<string[] | null> {
+): Promise<{ ids: string[]; created: string[] } | null> {
   try {
     const path = typeof manifest["items"] === "string" && manifest["items"].trim() ? manifest["items"].trim() : "items/index.json";
     const res = await fetchFn(new URL(path, origin).toString());
@@ -62,12 +68,15 @@ async function indexItemIds(
     const doc = JSON.parse(await res.text()) as { items?: unknown };
     if (!Array.isArray(doc.items)) return null;
     const ids = new Set<string>();
+    const created: string[] = [];
     for (const it of doc.items) {
-      const id = (it as { id?: unknown } | null)?.id;
+      const entry = it as { id?: unknown; created?: unknown } | null;
+      const id = entry?.id;
       if (typeof id === "string" && id.length > 0 && id.length <= 64) ids.add(id);
+      if (typeof entry?.created === "string" && entry.created.length <= 40) created.push(entry.created);
       if (ids.size >= MAX_ITEM_IDS) break;
     }
-    return [...ids];
+    return { ids: [...ids], created };
   } catch {
     return null;
   }
@@ -165,13 +174,14 @@ function homeFromFeed(feedUrl: string): string | null {
  * fails a submission: by this point the URL has already resolved as a feed, and
  * a missing title costs a nicer label, nothing more.
  */
-async function feedTitle(feedUrl: string, fetchFn: FetchLike = platformFetch): Promise<string | null> {
+async function feedInfo(feedUrl: string, fetchFn: FetchLike = platformFetch): Promise<{ title: string | null; dates: string[] | null }> {
   try {
     const res = await fetchFn(feedUrl);
-    if (!res.ok) return null;
-    return channelTitle(await res.text());
+    if (!res.ok) return { title: null, dates: null };
+    const xml = await res.text();
+    return { title: channelTitle(xml), dates: itemDates(xml) };
   } catch {
-    return null;
+    return { title: null, dates: null };
   }
 }
 
@@ -191,6 +201,7 @@ export async function validateSubmission(
 
   const r = await resolve(input, fetchFn);
   if (r.kind === "blyg") {
+    const index = opts.itemIds === false ? null : await readIndex(r.manifest, r.origin, fetchFn);
     return {
       kind: "blyg",
       origin: r.origin,
@@ -202,7 +213,8 @@ export async function validateSubmission(
       movedFrom: Array.isArray(r.manifest["moved_from"])
         ? (r.manifest["moved_from"] as unknown[]).filter((x): x is string => typeof x === "string")
         : [],
-      itemIds: opts.itemIds === false ? null : await indexItemIds(r.manifest, r.origin, fetchFn),
+      itemIds: index?.ids ?? null,
+      recentPosts: index?.created ?? null,
       // Surfaced, not adopted — decision #17's rule that a mirror must never
       // inherit another origin's identity. Worth recording when it happens.
       note: r.siteMismatch
@@ -211,18 +223,21 @@ export async function validateSubmission(
     };
   }
   if (r.kind === "rss") {
-    // One extra GET, at submission time only, to learn what the publication
-    // calls itself. The resolver already fetched this document to decide it was
-    // a feed but does not return the body, and `src/vendor/` is copied from
+    // One extra GET, at submission and at each re-check, to learn what the
+    // publication calls itself and when it posted (the activity level). The
+    // resolver already fetched this document to decide it was a feed but does
+    // not return the body, and `src/vendor/` is copied from
     // blygger-spec and must not be edited here — so the choice is one more
     // request or a feed row that reads as a bare hostname forever. A directory
     // whose entries are half named and half hostnames is not much of a
     // directory.
+    const info = await feedInfo(r.feedUrl, fetchFn);
     return {
       kind: "rss",
       origin: r.feedUrl,
-      title: await feedTitle(r.feedUrl, fetchFn),
+      title: info.title,
       homeUrl: homeFromFeed(r.feedUrl),
+      recentPosts: info.dates,
       note: null,
     };
   }
