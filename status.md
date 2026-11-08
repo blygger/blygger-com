@@ -1,6 +1,17 @@
 # Status — blygger-com
 
 ## Active
+- **Session 61 (2026-11-07, Opus) — the directory sorts by activity.** Default order
+  is now activity (Newest and Oldest by listing date are the alternatives, plain links
+  that keep the open tab): a time-discounted sum over each listing's last 10 posts,
+  half-life 30 days, posts within an hour counted once, future dates ignored
+  (`src/activity.ts`), shown as ● ◐ ○ with a tooltip; unmeasured listings show a dot
+  and sort last. Post times come from what the re-check already fetches — a blyg's
+  archive-index `created`, a feed's item dates — into `recent_posts` (migration 0011,
+  public, at most 50). Migration applied remote; deployed (Worker `f5309972`), pushed
+  (`b89e773`). 44 of 52 listings backfilled by hand from here with the same
+  `validateSubmission`; the cron fills the rest. 24 high, 11 medium, 9 low at launch;
+  Venkat expects the scale to settle after the developer launch. 71 tests.
 - **Session 55 (2026-11-01, Opus) — moved blygs fold into one listing (decision
   #88).** Migration 0010 (`moved_to`), applied remote; deployed (Worker version
   `c32e0d0a`), pushed (`9e663c0`). The re-check reads a listing's old manifest without
