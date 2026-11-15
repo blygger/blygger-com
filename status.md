@@ -1,6 +1,10 @@
 # Status — blygger-com
 
 ## Active
+- **Session 71 (2026-11-14, Opus) — `/blygs.json`, deployed and pushed.** The OPML's blygs
+  as JSON, most active first, with `listedAt` and each activity level, score, events and
+  last post, plus the scoring constants; CORS-open, ETag. Read by studio 0.60.0's Discover.
+  Roadmap 125 (a directory API/MCP) and 126 (any conforming discovery service) filed.
 - **Session 61 (2026-11-07, Opus) — the directory sorts by activity.** Default order
   is now activity (Newest and Oldest by listing date are the alternatives, plain links
   that keep the open tab): a time-discounted sum over each listing's last 10 posts,
