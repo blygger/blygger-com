@@ -692,6 +692,49 @@ describe("listings.xml", () => {
   });
 });
 
+describe("blygs.json", () => {
+  it("lists the OPML's blygs with activity, most active first, CORS-open", async () => {
+    const { insertSubmission } = await import("../src/store.ts");
+    const ids = [];
+    for (const [host, title, kind] of [["quiet.example", "Quiet Blyg", "blyg"], ["busy.example", "Busy Blyg", "blyg"], ["jsonfeed.example", "Json Legacy", "rss"]] as const)
+      ids.push(await insertSubmission(env.DB, {
+        submittedUrl: `https://${host}/`, kind, origin: `https://${host}/`, title,
+        homeUrl: `https://${host}/`, resolveNote: null, contact: null, reviewReason: null, warnings: [],
+      }));
+    const recent = [0, 3, 8].map((days) => new Date(Date.now() - days * 86400000).toISOString());
+    await env.DB.prepare(`UPDATE submissions SET recent_posts = ? WHERE id = ?`).bind(JSON.stringify(recent), ids[1]).run();
+    const res = await get("/blygs.json");
+    expect(res.headers.get("content-type")).toContain("application/json");
+    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    const body = await res.json() as { version: number; activity: { halfLifeDays: number }; blygs: { origin: string; title: string; feed: string; listedAt: string; activity: { level: string | null; events: number; lastPost: string | null } }[] };
+    expect(body.version).toBe(1);
+    expect(body.activity.halfLifeDays).toBe(30);
+    const busy = body.blygs.findIndex((b) => b.origin === "https://busy.example/");
+    const quiet = body.blygs.findIndex((b) => b.origin === "https://quiet.example/");
+    expect(busy).toBeGreaterThanOrEqual(0);
+    expect(busy).toBeLessThan(quiet);
+    expect(body.blygs[busy]).toMatchObject({ title: "Busy Blyg", feed: "https://busy.example/feed.xml", activity: { level: "medium", events: 3 } });
+    expect(body.blygs[busy].activity.lastPost).toBe(recent[0]);
+    expect(body.blygs[quiet].activity).toMatchObject({ level: null, events: 0, lastPost: null });
+    expect(body.blygs.some((b) => b.title === "Json Legacy")).toBe(false);
+    expect(await (await get("/")).text()).toContain('href="/blygs.json"');
+    for (const id of ids) await env.DB.prepare(`DELETE FROM submissions WHERE id = ?`).bind(id).run();
+  });
+
+  it("leaves out withdrawn blygs, as the OPML does", async () => {
+    const { blygsJson } = await import("../src/pages.ts");
+    const rows = [
+      { kind: "blyg" as const, title: "Alive", home_url: "https://alive.example/", origin: "https://alive.example/",
+        listed_at: "2026-10-01T00:00:00Z", failing_since: null, flags: null, defect_since: null, protocol: "0.4", level: 2, generator: "x/1" },
+      { kind: "blyg" as const, title: "Gone", home_url: "https://gone.example/", origin: "https://gone.example/",
+        listed_at: "2026-10-01T00:00:00Z", failing_since: "2026-09-01T00:00:00Z", flags: null, defect_since: null, protocol: null, level: null, generator: null },
+    ];
+    const json = JSON.parse(blygsJson(rows, new Date("2026-10-06T12:00:00Z")));
+    expect(json.blygs.map((b: { title: string }) => b.title)).toEqual(["Alive"]);
+    expect(json.blygs[0]).toMatchObject({ protocol: "0.4", protocolLevel: 2, generator: "x/1", listedAt: "2026-10-01T00:00:00.000Z" });
+  });
+});
+
 describe("dormancy", () => {
   it("only a 72-hour run of failures is dormant", async () => {
     const { isDormant } = await import("../src/health.ts");

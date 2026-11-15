@@ -9,7 +9,7 @@ import { escapeHtml } from "./util.ts";
 import { isWithdrawn, parseFlags, publicMarks, type UnlistedBlyg } from "./health.ts";
 import { DEFECTS } from "./review.ts";
 import { CURRENT_PROTOCOL, protocolBehind } from "./validate.ts";
-import { activityOf, HALF_LIFE_DAYS, POSTS_COUNTED, type Activity } from "./activity.ts";
+import { activityOf, BURST_GAP_MS, HALF_LIFE_DAYS, HIGH_AT, MEDIUM_AT, POSTS_COUNTED, type Activity } from "./activity.ts";
 
 const STYLE = `
 :root {
@@ -146,6 +146,7 @@ function layout(title: string, body: string, script = ""): string {
 <meta name="description" content="A directory of blygs — sites publishing with the Blygger protocol.">
 <link rel="outline" type="text/x-opml" title="Blygs listed on blygger.com" href="/blygs.opml">
 <link rel="alternate" type="application/atom+xml" title="New on blygger.com" href="/listings.xml">
+<link rel="alternate" type="application/json" title="Blygs listed on blygger.com, with activity" href="/blygs.json">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22><circle cx=%228%22 cy=%228%22 r=%227%22 fill=%22%231f5fc2%22/></svg>">
 <style>${STYLE}</style>
 </head>
@@ -421,8 +422,8 @@ ${sortNav(order)}
 <div class="panel" role="tabpanel" id="panel-blygs" aria-labelledby="tab-blygs">
 <h2 class="nojs">Blygs</h2>
 <p class="tabhint">Every blyg below, as one file a feed reader or agent can import:
-  <a href="/blygs.opml">blygs.opml</a>. To hear about new ones, subscribe to
-  <a href="/listings.xml">listings.xml</a>.</p>
+  <a href="/blygs.opml">blygs.opml</a>, or <a href="/blygs.json">blygs.json</a> with each
+  blyg's activity. To hear about new ones, subscribe to <a href="/listings.xml">listings.xml</a>.</p>
 <p class="tabhint">Every listing is re-checked several times a day. A dashed mark is
   something the last check found. A blyg unreachable for three days, or carrying a
   defect for two weeks, is left out of both files until it is fixed — it stays listed
@@ -636,6 +637,54 @@ ${outlines}
 function rfc3339(iso: string): string {
   const t = Date.parse(iso);
   return Number.isNaN(t) ? new Date(0).toISOString() : new Date(t).toISOString();
+}
+
+/**
+ * The same blygs as /blygs.opml, as JSON with what OPML has no room for: when
+ * each was listed and its activity (activity.ts), so a client can offer the
+ * directory as a discovery list without reading this page's HTML. Ordered as
+ * the page's default sort, most active first. Field names are camelCase and
+ * only ever added to; `version` changes if one is removed or changes meaning.
+ * Activity is computed at the request, like the page's mark, so it fades
+ * between re-checks.
+ */
+export function blygsJson(rows: PublicRow[], now = new Date()): string {
+  const blygs = sortRows(machineBlygs(rows, now), "activity", now).map((r) => {
+    const home = r.home_url ?? r.origin ?? "";
+    const a = activityOf(r.recent_posts, now);
+    return {
+      origin: r.origin,
+      title: r.title?.trim() || hostOf(home),
+      home,
+      feed: feedUrlOf(r),
+      listedAt: rfc3339(r.listed_at),
+      protocol: r.protocol,
+      protocolLevel: r.level,
+      generator: r.generator,
+      activity: {
+        level: a.level,
+        score: Math.round(a.score * 100) / 100,
+        events: a.events,
+        lastPost: a.last,
+      },
+    };
+  });
+  return JSON.stringify({
+    version: 1,
+    directory: "https://blygger.com/",
+    generated: now.toISOString(),
+    activity: {
+      about: "A time-discounted count of recent publishing events: each counts 0.5^(age / halfLifeDays), "
+        + "posts within burstGapMinutes of each other count once, at most postsCounted. "
+        + "level is null when no post times are known yet, which is not the same as low.",
+      halfLifeDays: HALF_LIFE_DAYS,
+      postsCounted: POSTS_COUNTED,
+      burstGapMinutes: BURST_GAP_MS / 60000,
+      highAt: HIGH_AT,
+      mediumAt: MEDIUM_AT,
+    },
+    blygs,
+  }, null, 2) + "\n";
 }
 
 /**

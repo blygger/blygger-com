@@ -13,7 +13,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { etag } from "hono/etag";
 import { checkPassword, clearSessionCookie, issueSessionCookie, verifySession } from "./auth.ts";
-import { adminPage, blygsOpml, listingsAtom, loginPage, publicPage, sortOrder } from "./pages.ts";
+import { adminPage, blygsJson, blygsOpml, listingsAtom, loginPage, publicPage, sortOrder } from "./pages.ts";
 import { listUnlistedBlygs, runHealthPass, timedFetch } from "./health.ts";
 import { applyRecheck, findDuplicate, getByOrigin, insertSubmission, listApproved, listForReview, listPending, setContactIfEmpty, setStatus, getById } from "./store.ts";
 import { reviewReason } from "./review.ts";
@@ -38,6 +38,18 @@ app.get("/blygs.opml", etag(), async (c) => {
   const rows = await listApproved(c.env.DB);
   return c.body(blygsOpml(rows), 200, {
     "content-type": "text/x-opml; charset=utf-8",
+    "cache-control": PUBLIC_CACHE,
+    "access-control-allow-origin": "*",
+  });
+});
+
+// The same list as JSON, with each blyg's listing date and activity level, so
+// a client can offer discovery without reading the page's HTML. CORS-open
+// like the OPML: a studio fetches it straight from the owner's browser.
+app.get("/blygs.json", etag(), async (c) => {
+  const rows = await listApproved(c.env.DB);
+  return c.body(blygsJson(rows), 200, {
+    "content-type": "application/json; charset=utf-8",
     "cache-control": PUBLIC_CACHE,
     "access-control-allow-origin": "*",
   });
