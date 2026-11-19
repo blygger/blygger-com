@@ -315,6 +315,9 @@ describe("every inline script parses", () => {
           protocol: "0.2",
           level: 2,
           generator: "x/1",
+          generator_url: null,
+          author_name: null,
+          author_url: null,
           item_ids: null,
           review_reason: null,
           warnings: null,
@@ -976,9 +979,9 @@ describe("protocol census (migration 0007)", () => {
   it("reads the manifest defensively", async () => {
     const { manifestCensus } = await import("../src/validate.ts");
     expect(manifestCensus({ blyg: "0.3", level: 2, generator: "blygger-studio/0.32.1" }))
-      .toEqual({ protocol: "0.3", level: 2, generator: "blygger-studio/0.32.1" });
+      .toEqual({ protocol: "0.3", level: 2, generator: "blygger-studio/0.32.1", generatorUrl: null });
     expect(manifestCensus({ blyg: "<script>", level: "2", generator: "" }))
-      .toEqual({ protocol: null, level: null, generator: null });
+      .toEqual({ protocol: null, level: null, generator: null, generatorUrl: null });
     expect(manifestCensus({ blyg: 0.2 }).protocol).toBe("0.2");
   });
 
@@ -1127,7 +1130,7 @@ describe("activity level (session 61, src/activity.ts)", () => {
     expect(future.level).toBeNull();
   });
 
-  it("orders by activity by default, with unmeasured listings last; newest and oldest go by listing date", async () => {
+  it("orders newest first by default; activity puts unmeasured listings last; oldest goes by listing date", async () => {
     const { publicPage } = await import("../src/pages.ts");
     const rows = [
       row("Quiet", "2026-09-01T00:00:00Z", [ago(200)]),
@@ -1136,8 +1139,8 @@ describe("activity level (session 61, src/activity.ts)", () => {
       row("Steady", "2026-08-01T00:00:00Z", Array.from({ length: 10 }, (_, k) => ago(30 * k))),
     ];
     const order = (html: string) => ["Quiet", "Busy", "Unknown", "Steady"].sort((a, b) => html.indexOf(`>${a}<`) - html.indexOf(`>${b}<`));
-    expect(order(publicPage(rows, NOW))).toEqual(["Busy", "Steady", "Quiet", "Unknown"]);
-    expect(order(publicPage(rows, NOW, "newest"))).toEqual(["Unknown", "Busy", "Quiet", "Steady"]);
+    expect(order(publicPage(rows, NOW))).toEqual(["Unknown", "Busy", "Quiet", "Steady"]);
+    expect(order(publicPage(rows, NOW, "activity"))).toEqual(["Busy", "Steady", "Quiet", "Unknown"]);
     expect(order(publicPage(rows, NOW, "oldest"))).toEqual(["Steady", "Quiet", "Busy", "Unknown"]);
   });
 
@@ -1151,13 +1154,26 @@ describe("activity level (session 61, src/activity.ts)", () => {
   it("the sort control links the other orders and marks the current one", async () => {
     const res = await get("/?sort=oldest");
     const html = await res.text();
-    expect(html).toContain('<strong aria-current="true"');
-    expect(html).toContain('href="/"');
-    expect(html).toContain('href="/?sort=newest"');
+    expect(html).toContain('<strong class="sortbtn on" aria-current="true"');
+    expect(html).toContain('<a class="sortbtn" href="/"');
+    expect(html).toContain('<a class="sortbtn" href="/?sort=activity"');
     expect(html).not.toContain('href="/?sort=oldest"');
     // An unknown value falls back to the default rather than failing.
     expect(res.status).toBe(200);
-    expect(await (await get("/?sort=bogus")).text()).toContain('href="/?sort=oldest"');
+    const fallback = await (await get("/?sort=bogus")).text();
+    expect(fallback).toContain('<a class="sortbtn" href="/?sort=oldest"');
+    expect(fallback).not.toContain('<a class="sortbtn" href="/"');
+  });
+
+  it("puts the sort row directly above each list, after the panel's description", async () => {
+    const { publicPage } = await import("../src/pages.ts");
+    const html = publicPage([row("Busy", "2026-10-01T00:00:00Z", null), { ...row("Plain", "2026-10-02T00:00:00Z", null), kind: "rss" as const }], NOW);
+    const panel = html.slice(html.indexOf('id="panel-blygs"'), html.indexOf('id="panel-legacy"'));
+    expect(panel.indexOf('nav class="sort"')).toBeGreaterThan(panel.indexOf("re-checked several times a day"));
+    expect(panel.indexOf('nav class="sort"')).toBeLessThan(panel.indexOf('<ul class="blygs">'));
+    const legacy = html.slice(html.indexOf('id="panel-legacy"'));
+    expect(legacy.indexOf('nav class="sort"')).toBeLessThan(legacy.indexOf('<ul class="blygs">'));
+    expect(html.indexOf('nav class="sort"')).toBeGreaterThan(html.indexOf('role="tablist"'));
   });
 
   it("reads post times from a blyg's archive index and a feed's items", async () => {
@@ -1189,5 +1205,56 @@ describe("activity level (session 61, src/activity.ts)", () => {
       } }),
     );
     expect(feed.recentPosts).toEqual(["2026-11-06T10:00:00.000Z"]);
+  });
+});
+
+describe("the about line (migration 0012, session 75)", () => {
+  it("reads the manifest's author: name, then url or the first link", async () => {
+    const { manifestAuthor, manifestCensus } = await import("../src/validate.ts");
+    expect(manifestAuthor({ author: { name: " Brady Dale ", links: [{ label: "Home", url: "https://bradydale.com/" }] } }))
+      .toEqual({ name: "Brady Dale", url: "https://bradydale.com/" });
+    expect(manifestAuthor({ author: { name: "A", url: "https://a.example/", links: [{ url: "https://b.example/" }] } }))
+      .toEqual({ name: "A", url: "https://a.example/" });
+    expect(manifestAuthor({ author: { name: "A", url: "javascript:alert(1)" } })).toEqual({ name: "A", url: null });
+    expect(manifestAuthor({ author: { url: "https://a.example/" } })).toBeNull();
+    expect(manifestAuthor({ author: "A" })).toBeNull();
+    expect(manifestCensus({ generator: "g/1", generator_url: "https://github.com/x/g" }).generatorUrl).toBe("https://github.com/x/g");
+    expect(manifestCensus({ generator_url: "ftp://x/" }).generatorUrl).toBeNull();
+  });
+
+  it("reads a feed's author, never a bare email address", async () => {
+    const { channelAuthor } = await import("../src/feed-title.ts");
+    expect(channelAuthor('<feed xmlns="http://www.w3.org/2005/Atom"><title>T</title><author><name>Ann Atom</name></author></feed>')).toBe("Ann Atom");
+    expect(channelAuthor('<rss xmlns:dc="http://purl.org/dc/elements/1.1/"><channel><title>T</title><dc:creator>Dee Cee</dc:creator></channel></rss>')).toBe("Dee Cee");
+    expect(channelAuthor("<rss><channel><title>T</title><managingEditor>ed@x.example (Ed Itor)</managingEditor></channel></rss>")).toBe("Ed Itor");
+    expect(channelAuthor("<rss><channel><title>T</title><managingEditor>ed@x.example</managingEditor></channel></rss>")).toBeNull();
+    expect(channelAuthor("<rss><channel><title>T</title></channel></rss>")).toBeNull();
+  });
+
+  it("is stored at submission, refreshed by the re-check, and shown folded under the listing", async () => {
+    const { runHealthPass } = await import("../src/health.ts");
+    const { insertSubmission, getById } = await import("../src/store.ts");
+    await env.DB.prepare(`DELETE FROM submissions`).run();
+    const id = await insertSubmission(env.DB, {
+      submittedUrl: "https://ab.example/", kind: "blyg", origin: "https://ab.example/", title: "About Blyg",
+      homeUrl: "https://ab.example/", resolveNote: null, contact: null, reviewReason: null, warnings: [],
+      census: { protocol: "0.4", level: 2, generator: "c/1", generatorUrl: null }, author: { name: "Old <Name>", url: null },
+    });
+    let page = await (await get("/")).text();
+    expect(page).toContain('<details class="about"><summary>about</summary>');
+    expect(page).toContain("by Old &lt;Name&gt;");
+
+    await runHealthPass(env.DB, stubFetch({
+      "https://ab.example/": { body: '<link rel="blyg" href="/blyg.json">' },
+      "https://ab.example/blyg.json": {
+        body: MANIFEST("https://ab.example/", { blyg: "0.4", level: 2, generator: "c/2", generator_url: "https://github.com/x/c",
+          author: { name: "New Name", url: "https://new.example/" } }), type: "application/json",
+      },
+    }) as any, new Date("2026-10-01T00:00:00Z"));
+    const row = await getById(env.DB, id);
+    expect([row?.author_name, row?.author_url, row?.generator_url]).toEqual(["New Name", "https://new.example/", "https://github.com/x/c"]);
+    page = await (await get("/")).text();
+    expect(page).toContain('by <a href="https://new.example/" rel="nofollow">New Name</a> · client <a href="https://github.com/x/c" rel="nofollow">c/2</a> · protocol 0.4, level 2 · listed ');
+    await env.DB.prepare(`DELETE FROM submissions`).run();
   });
 });

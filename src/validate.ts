@@ -9,7 +9,7 @@
 
 import { resolve } from "./vendor/resolve.ts";
 import { platformFetch, type FetchLike } from "./vendor/http.ts";
-import { channelTitle, itemDates } from "./feed-title.ts";
+import { channelAuthor, channelTitle, itemDates } from "./feed-title.ts";
 
 export interface Validated {
   kind: "blyg" | "rss" | "failure";
@@ -46,6 +46,13 @@ export interface Validated {
    * archive-index `created` times, or a feed's item dates. Null when unread.
    */
   recentPosts?: string[] | null;
+  /** Who writes it (migration 0012): a blyg's manifest `author`, a feed's channel author. */
+  author?: Author | null;
+}
+
+export interface Author {
+  name: string;
+  url: string | null;
 }
 
 const MAX_ITEM_IDS = 5000;
@@ -106,6 +113,35 @@ export interface Census {
   protocol: string | null;
   level: number | null;
   generator: string | null;
+  /** The manifest's `generator_url` (§6.1): where the client's code is. */
+  generatorUrl: string | null;
+}
+
+/** An http(s) URL as given, or null: these end up as links on a public page. */
+export function webUrl(v: unknown): string | null {
+  if (typeof v !== "string" || !v.trim() || v.length > 300) return null;
+  try {
+    const u = new URL(v.trim());
+    return u.protocol === "https:" || u.protocol === "http:" ? u.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The manifest's OPTIONAL `author` (§5.5's shape): `name`, and `url` or else
+ * the first of `links`. Read as defensively as the census: a stranger's
+ * self-description printed on a public page.
+ */
+export function manifestAuthor(manifest: Record<string, unknown>): Author | null {
+  const a = manifest["author"];
+  if (!a || typeof a !== "object") return null;
+  const o = a as Record<string, unknown>;
+  const name = typeof o["name"] === "string" ? o["name"].trim().slice(0, 100) : "";
+  if (!name) return null;
+  const links = Array.isArray(o["links"]) ? (o["links"] as unknown[]) : [];
+  const first = links.map((l) => webUrl((l as Record<string, unknown> | null)?.["url"])).find(Boolean) ?? null;
+  return { name, url: webUrl(o["url"]) ?? first };
 }
 
 /**
@@ -122,6 +158,7 @@ export function manifestCensus(manifest: Record<string, unknown>): Census {
     protocol: /^\d{1,3}\.\d{1,3}$/.test(ver) ? ver : null,
     level: typeof l === "number" && Number.isInteger(l) && l >= 0 && l <= 9 ? l : null,
     generator: typeof g === "string" && g.trim() ? g.trim().slice(0, 100) : null,
+    generatorUrl: webUrl(manifest["generator_url"]),
   };
 }
 
@@ -174,14 +211,15 @@ function homeFromFeed(feedUrl: string): string | null {
  * fails a submission: by this point the URL has already resolved as a feed, and
  * a missing title costs a nicer label, nothing more.
  */
-async function feedInfo(feedUrl: string, fetchFn: FetchLike = platformFetch): Promise<{ title: string | null; dates: string[] | null }> {
+async function feedInfo(feedUrl: string, fetchFn: FetchLike = platformFetch): Promise<{ title: string | null; dates: string[] | null; author: Author | null }> {
   try {
     const res = await fetchFn(feedUrl);
-    if (!res.ok) return { title: null, dates: null };
+    if (!res.ok) return { title: null, dates: null, author: null };
     const xml = await res.text();
-    return { title: channelTitle(xml), dates: itemDates(xml) };
+    const author = channelAuthor(xml);
+    return { title: channelTitle(xml), dates: itemDates(xml), author: author ? { name: author, url: null } : null };
   } catch {
-    return { title: null, dates: null };
+    return { title: null, dates: null, author: null };
   }
 }
 
@@ -210,6 +248,7 @@ export async function validateSubmission(
       blogrollUrl: manifestBlogroll(r.manifest, r.origin),
       feedUrl: manifestFeed(r.manifest, r.origin),
       census: manifestCensus(r.manifest),
+      author: manifestAuthor(r.manifest),
       movedFrom: Array.isArray(r.manifest["moved_from"])
         ? (r.manifest["moved_from"] as unknown[]).filter((x): x is string => typeof x === "string")
         : [],
@@ -238,6 +277,7 @@ export async function validateSubmission(
       title: info.title,
       homeUrl: homeFromFeed(r.feedUrl),
       recentPosts: info.dates,
+      author: info.author,
       note: null,
     };
   }

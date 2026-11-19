@@ -81,3 +81,27 @@ export function itemDates(xml: string): string[] {
   }
   return out;
 }
+
+/**
+ * The publication's author from the feed itself (session 75, the directory's
+ * about line): Atom `<feed><author><name>`, RSS `<dc:creator>` or
+ * `<itunes:author>` on the channel, or the name in `managingEditor`'s
+ * "email (Name)" form. Never the bare address: an email does not go on a
+ * public page. Same tolerance as `channelTitle`.
+ */
+export function channelAuthor(xml: string): string | null {
+  if (XMLValidator.validate(xml) !== true) return null;
+  let parsed: unknown;
+  try {
+    parsed = new XMLParser({ ignoreAttributes: false }).parse(xml);
+  } catch {
+    return null;
+  }
+  const root = parsed as Record<string, any> | null;
+  const one = (v: unknown) => (Array.isArray(v) ? v[0] : v);
+  const channel = root?.rss?.channel;
+  const editor = textOf(channel?.managingEditor)?.match(/\(([^()]+)\)\s*$/)?.[1]?.trim() || null;
+  const raw = textOf(one(root?.feed?.author)?.name) ?? textOf(one(channel?.["dc:creator"])) ??
+    textOf(one(channel?.["itunes:author"])) ?? editor;
+  return raw && !raw.includes("@") ? raw.slice(0, 100) : null;
+}

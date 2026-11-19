@@ -157,6 +157,7 @@ app.post("/api/submit", async (c) => {
     itemIds: v.itemIds,
     feedUrl: v.feedUrl,
     recentPosts: v.recentPosts,
+    author: v.author,
   });
 
   const what = v.kind === "blyg" ? "Resolved as a blyg" : "Resolved as a feed (not a blyg)";

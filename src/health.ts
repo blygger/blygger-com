@@ -28,7 +28,7 @@
 
 import { XMLParser } from "fast-xml-parser";
 import { DEFECT_LABEL, DEFECTS, reviewReason, type FindingCode } from "./review.ts";
-import { validateSubmission, type Census } from "./validate.ts";
+import { validateSubmission, type Author, type Census } from "./validate.ts";
 import type { FetchLike } from "./vendor/http.ts";
 import { IMPORTER_USER_AGENT } from "./vendor/http.ts";
 import type { SubmissionRow } from "./types.ts";
@@ -243,6 +243,7 @@ export async function runHealthPass(
     let feedUrl: string | null = null;
     let movedTo: string | null = null;
     let recentPosts: string | null = null;
+    let author: Author | null = null;
     try {
       const v = await validateSubmission(recheckTarget(row), fetchFn);
       let current = row.origin;
@@ -307,6 +308,7 @@ export async function runHealthPass(
         census = v.census ?? null;
         feedUrl = v.feedUrl ?? null;
         recentPosts = postTimesColumn(v.recentPosts ?? []);
+        author = v.author ?? null;
         const notes: string[] = [];
         if (r.block) notes.push(`would now be held: ${r.block}`);
         // Names change (Venkat, session 38: "several blygs have had their names
@@ -358,7 +360,10 @@ export async function runHealthPass(
            item_ids        = COALESCE(?13, item_ids),
            feed_url        = COALESCE(?14, feed_url),
            moved_to        = CASE WHEN ?2 THEN ?15 ELSE moved_to END,
-           recent_posts    = COALESCE(?16, recent_posts)
+           recent_posts    = COALESCE(?16, recent_posts),
+           generator_url   = CASE WHEN ?8 THEN ?17 ELSE generator_url END,
+           author_name     = CASE WHEN ?2 THEN ?18 ELSE author_name END,
+           author_url      = CASE WHEN ?2 THEN ?19 ELSE author_url END
          WHERE id = ?7`,
       )
       .bind(
@@ -378,6 +383,9 @@ export async function runHealthPass(
         feedUrl,
         movedTo,
         recentPosts,
+        census?.generatorUrl ?? null,
+        author?.name ?? null,
+        author?.url ?? null,
       )
       .run();
     report.checked.push({ id: row.id, ok, note });

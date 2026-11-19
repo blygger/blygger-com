@@ -115,11 +115,26 @@ ul.blygs .host { font-family: var(--sans); font-size: 0.8rem; color: var(--soft)
 .act.high { color: #2a7d4f; } .act.medium { color: #a8661a; } .act.low { color: var(--soft); }
 .act.none { color: var(--soft); }
 @media (prefers-color-scheme: dark) { .act.high { color: #5fc28a; } .act.medium { color: #e0a85a; } }
-nav.sort { font-family: var(--sans); font-size: 0.8rem; color: var(--soft); margin: 1rem 0 0.25rem; }
-nav.sort a, nav.sort strong { margin-left: 0.6rem; }
-nav.sort a { color: var(--soft); text-decoration: none; }
-nav.sort a:hover { color: var(--accent); }
-nav.sort strong { color: var(--ink); font-weight: 600; }
+/* The sort row sits directly above each list (session 75): buttons, the current one filled. */
+nav.sort { font-family: var(--sans); font-size: 0.78rem; color: var(--soft); margin: 1.4rem 0 0.4rem;
+  display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+nav.sort .label { margin-right: 0.2rem; }
+.sortbtn { display: inline-block; padding: 0.3rem 0.8rem; border: 1px solid var(--rule);
+  border-radius: 999px; color: var(--ink); text-decoration: none; line-height: 1.2; }
+a.sortbtn:hover { border-color: var(--accent); color: var(--accent); }
+.sortbtn.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+.legend { margin-top: 0; }
+/* The about line (session 75): author and client, folded under the main line. */
+details.about { flex-basis: 100%; margin: -0.35rem 0 0 1.75rem; font-family: var(--sans);
+  font-size: 0.75rem; color: var(--soft); }
+details.about summary { display: inline; cursor: pointer; list-style: none; }
+details.about summary::-webkit-details-marker { display: none; }
+details.about summary::before { content: "\\25B8  "; }
+details.about[open] summary::before { content: "\\25BE  "; }
+details.about summary:hover { color: var(--accent); }
+details.about .body { margin-left: 0.5rem; }
+details.about a { color: var(--soft); }
+details.about a:hover { color: var(--accent); }
 .legend .act { cursor: default; }
 .empty { color: var(--soft); font-style: italic; }
 footer { margin-top: 3.5rem; border-top: 1px solid var(--rule); padding-top: 1.1rem;
@@ -288,14 +303,15 @@ function versionMark(r: PublicRow): string {
   return `<span class="ver${behind ? " behind" : ""}" title="${escapeHtml(bits.join(" · "))}">v${escapeHtml(r.protocol)}</span>`;
 }
 
-export type SortOrder = "activity" | "newest" | "oldest";
+// Newest first is the default again (Venkat, session 75; activity was the default from session 61).
+export type SortOrder = "newest" | "oldest" | "activity";
 export const SORT_ORDERS: { id: SortOrder; label: string; title: string }[] = [
-  { id: "activity", label: "Activity", title: "most active first: recent and frequent posts" },
   { id: "newest", label: "Newest", title: "most recently listed first" },
   { id: "oldest", label: "Oldest", title: "first listed first" },
+  { id: "activity", label: "Most active", title: "most active first: recent and frequent posts" },
 ];
 export const sortOrder = (q: string | null | undefined): SortOrder =>
-  q === "newest" || q === "oldest" ? q : "activity";
+  q === "activity" || q === "oldest" ? q : "newest";
 
 const ACT_SYMBOL = { high: "●", medium: "◐", low: "○" } as const;
 
@@ -331,12 +347,40 @@ function sortRows(rows: PublicRow[], order: SortOrder, now: Date): PublicRow[] {
 }
 
 function sortNav(order: SortOrder): string {
-  const links = SORT_ORDERS.map((o) =>
+  const buttons = SORT_ORDERS.map((o) =>
     o.id === order
-      ? `<strong aria-current="true" title="${escapeHtml(o.title)}">${o.label}</strong>`
-      : `<a href="${o.id === "activity" ? "/" : `/?sort=${o.id}`}" title="${escapeHtml(o.title)}">${o.label}</a>`,
+      ? `<strong class="sortbtn on" aria-current="true" title="${escapeHtml(o.title)}">${o.label}</strong>`
+      : `<a class="sortbtn" href="${o.id === "newest" ? "/" : `/?sort=${o.id}`}" title="${escapeHtml(o.title)}">${o.label}</a>`,
   ).join("");
-  return `<nav class="sort" aria-label="Sort the directory">Sort:${links}</nav>`;
+  return `<nav class="sort" aria-label="Sort the list"><span class="label">Sort by</span>${buttons}</nav>`;
+}
+
+/** What goes directly above each list: the sort row, then the key to the activity marks. */
+function listHead(order: SortOrder): string {
+  return `${sortNav(order)}
+<p class="tabhint legend">Activity: <span class="act high" aria-hidden="true">●</span> high
+  <span class="act medium" aria-hidden="true">◐</span> medium <span class="act low" aria-hidden="true">○</span> low —
+  from the last ${POSTS_COUNTED} posts, each counting half as much for every ${HALF_LIFE_DAYS} days of age.</p>`;
+}
+
+/**
+ * The about line, folded under a listing (session 75): who writes it, the client
+ * that publishes it, the protocol it declares, when it was listed. All of it the
+ * site's own say-so (§3.2), read at the last re-check.
+ */
+function aboutLine(r: PublicRow): string {
+  const link = (text: string, url: string | null | undefined) =>
+    url ? `<a href="${escapeHtml(url)}" rel="nofollow">${escapeHtml(text)}</a>` : escapeHtml(text);
+  const bits: string[] = [];
+  if (r.author_name) bits.push(`by ${link(r.author_name, r.author_url)}`);
+  if (r.kind === "blyg") {
+    if (r.generator) bits.push(`client ${link(r.generator, r.generator_url)}`);
+    if (r.protocol) bits.push(`protocol ${escapeHtml(r.protocol)}${r.level != null ? `, level ${r.level}` : ""}`);
+  } else {
+    bits.push("a plain RSS or Atom feed");
+  }
+  bits.push(`listed ${escapeHtml(r.listed_at.slice(0, 10))}`);
+  return `<details class="about"><summary>about</summary><span class="body">${bits.join(" · ")}</span></details>`;
 }
 
 function listItems(rows: PublicRow[], mark: string, now: Date): string {
@@ -349,12 +393,12 @@ function listItems(rows: PublicRow[], mark: string, now: Date): string {
         .map((m) => `<span class="health" title="${escapeHtml(m.title)}">${escapeHtml(m.label)}</span>`)
         .join("");
       return `  <li>${activityMark(activityOf(r.recent_posts, now), now)}${mark}<a class="name" href="${escapeHtml(home)}">${escapeHtml(name)}</a>` +
-        `<span class="host">${escapeHtml(hostOf(home))}</span>${versionMark(r)}${health}</li>`;
+        `<span class="host">${escapeHtml(hostOf(home))}</span>${versionMark(r)}${health}${aboutLine(r)}</li>`;
     })
     .join("\n");
 }
 
-export function publicPage(allRows: PublicRow[], now = new Date(), order: SortOrder = "activity"): string {
+export function publicPage(allRows: PublicRow[], now = new Date(), order: SortOrder = "newest"): string {
   // A blyg that moved to another listed origin is shown once, at its new address (#88).
   const rows = sortRows(allRows.filter((r) => !r.moved_to), order, now);
   const blygs = rows.filter((r) => r.kind === "blyg");
@@ -411,10 +455,6 @@ and a few plain feeds worth reading. Links go to the site itself, not to its fee
 </details>
 
 <section id="dir">
-${sortNav(order)}
-<p class="tabhint legend">Activity: <span class="act high" aria-hidden="true">●</span> high
-  <span class="act medium" aria-hidden="true">◐</span> medium <span class="act low" aria-hidden="true">○</span> low —
-  from the last ${POSTS_COUNTED} posts, each counting half as much for every ${HALF_LIFE_DAYS} days of age.</p>
 <div role="tablist" aria-label="Directory" hidden>
   <button type="button" role="tab" id="tab-blygs" data-tab="blygs" aria-controls="panel-blygs">Blygs<span class="count">${blygs.length}</span></button>
   <button type="button" role="tab" id="tab-legacy" data-tab="legacy" aria-controls="panel-legacy">Legacy RSS<span class="count">${legacy.length}</span></button>
@@ -428,11 +468,13 @@ ${sortNav(order)}
   something the last check found. A blyg unreachable for three days, or carrying a
   defect for two weeks, is left out of both files until it is fixed — it stays listed
   here.</p>
+${listHead(order)}
 ${blygList}
 </div>
 <div class="panel" role="tabpanel" id="panel-legacy" aria-labelledby="tab-legacy">
 <h2 class="nojs">Legacy RSS</h2>
 <p class="tabhint">Plain RSS and Atom feeds — readable, but not speaking the protocol.</p>
+${listHead(order)}
 ${legacyList}
 </div>
 </section>`;
@@ -642,8 +684,9 @@ function rfc3339(iso: string): string {
 /**
  * The same blygs as /blygs.opml, as JSON with what OPML has no room for: when
  * each was listed and its activity (activity.ts), so a client can offer the
- * directory as a discovery list without reading this page's HTML. Ordered as
- * the page's default sort, most active first. Field names are camelCase and
+ * directory as a discovery list without reading this page's HTML. Ordered most
+ * active first, as the page was by default until session 75; clients may rely on
+ * it, so it stays when the page went back to newest first. Field names are camelCase and
  * only ever added to; `version` changes if one is removed or changes meaning.
  * Activity is computed at the request, like the page's mark, so it fades
  * between re-checks.
