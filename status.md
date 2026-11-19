@@ -1,6 +1,13 @@
 # Status — blygger-com
 
 ## Active
+- **Session 75 (2026-11-19, Opus) — the listing redesigned, deployed and pushed.** Newest
+  first is the default again (Most active a choice); the sort row sits directly above each
+  list as buttons; each listing has a folded about line (author, client linked to
+  `generator_url`, protocol, listing date). Migration 0012 (`author_name`, `author_url`,
+  `generator_url`), filled from the manifest or feed the check already reads; 43 rows
+  backfilled at deploy. `blygs.json` keeps its activity order. A sortable table is
+  ROADMAP row 135.
 - **Session 71 (2026-11-14, Opus) — `/blygs.json`, deployed and pushed.** The OPML's blygs
   as JSON, most active first, with `listedAt` and each activity level, score, events and
   last post, plus the scoring constants; CORS-open, ETag. Read by studio 0.60.0's Discover.
