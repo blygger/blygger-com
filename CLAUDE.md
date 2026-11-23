@@ -26,7 +26,7 @@ reference client, so there is nothing new to learn moving between them.
 
 | Path | Role |
 |---|---|
-| `src/index.ts` | Routes. `GET /`, `GET /blygs.opml`, `GET /blygs.json` (the same list with listing dates and activity, session 71), `GET /listings.xml`, `POST /api/submit`, `/admin*`; the hourly `scheduled` handler. |
+| `src/index.ts` | Routes. `GET /`, `GET /blygs.opml`, `GET /blygs.json` (the same list with listing dates and activity, session 71; author and generatorUrl, session 82), `GET /listings.xml`, `POST /api/submit`, `/admin*`; the hourly `scheduled` handler. |
 | `src/health.ts` | The hourly pass: re-resolves 4 listings per run, marks a listing **dormant** after 72 h of unbroken failures (out of the OPML and Atom feed, still on the page), and records blogroll sightings (admin-only "seen in blogrolls, not listed"). Budget notes at the top. |
 | `src/validate.ts` | Runs the v0.2 resolver against a submission. |
 | `src/store.ts` | Every D1 query. `listApproved` bakes in `status='approved'` so no code path can leak a pending row, and names its columns so no code path can leak a private one. |

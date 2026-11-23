@@ -704,6 +704,10 @@ export function blygsJson(rows: PublicRow[], now = new Date()): string {
       protocol: r.protocol,
       protocolLevel: r.level,
       generator: r.generator,
+      // The about line's facts (session 75), the site's own say-so at the last
+      // re-check: the manifest's author, else the feed's; the client's source.
+      generatorUrl: r.generator_url ?? null,
+      author: r.author_name ? { name: r.author_name, url: r.author_url ?? null } : null,
       activity: {
         level: a.level,
         score: Math.round(a.score * 100) / 100,

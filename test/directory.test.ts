@@ -728,13 +728,23 @@ describe("blygs.json", () => {
     const { blygsJson } = await import("../src/pages.ts");
     const rows = [
       { kind: "blyg" as const, title: "Alive", home_url: "https://alive.example/", origin: "https://alive.example/",
-        listed_at: "2026-10-01T00:00:00Z", failing_since: null, flags: null, defect_since: null, protocol: "0.4", level: 2, generator: "x/1" },
+        listed_at: "2026-10-01T00:00:00Z", failing_since: null, flags: null, defect_since: null, protocol: "0.4", level: 2, generator: "x/1",
+        generator_url: "https://x.example/src", author_name: "Ada", author_url: "https://ada.example/" },
       { kind: "blyg" as const, title: "Gone", home_url: "https://gone.example/", origin: "https://gone.example/",
         listed_at: "2026-10-01T00:00:00Z", failing_since: "2026-09-01T00:00:00Z", flags: null, defect_since: null, protocol: null, level: null, generator: null },
     ];
     const json = JSON.parse(blygsJson(rows, new Date("2026-10-06T12:00:00Z")));
     expect(json.blygs.map((b: { title: string }) => b.title)).toEqual(["Alive"]);
-    expect(json.blygs[0]).toMatchObject({ protocol: "0.4", protocolLevel: 2, generator: "x/1", listedAt: "2026-10-01T00:00:00.000Z" });
+    expect(json.blygs[0]).toMatchObject({ protocol: "0.4", protocolLevel: 2, generator: "x/1", listedAt: "2026-10-01T00:00:00.000Z",
+      generatorUrl: "https://x.example/src", author: { name: "Ada", url: "https://ada.example/" } });
+  });
+
+  it("gives author null when the blyg names none", async () => {
+    const { blygsJson } = await import("../src/pages.ts");
+    const rows = [{ kind: "blyg" as const, title: "Anonymous", home_url: "https://anon.example/", origin: "https://anon.example/",
+      listed_at: "2026-10-01T00:00:00Z", failing_since: null, flags: null, defect_since: null, protocol: null, level: null, generator: null }];
+    const json = JSON.parse(blygsJson(rows, new Date("2026-10-06T12:00:00Z")));
+    expect(json.blygs[0]).toMatchObject({ author: null, generatorUrl: null });
   });
 });
 
